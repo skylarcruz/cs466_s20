@@ -1,0 +1,97 @@
+1/19/2017 Windows10 setup for cs466 code.
+(All the '$' commands are from the Bash Terminal)
+
+
+Install git if you do not have it installed.   Thes instrucitons and 
+my practices make heavy use of the bash-shell that comes with the newer
+git installations.  If you have an old git installation I reccommentd 
+that you update it.
+
+    https://git-scm.com/download/win
+
+    Make sure git bash is checked
+    Use from git bash only (you can also use it from the windows command prompt 
+    yf you want)
+    Leave the rest as default
+
+
+Run a bash shell (right click menu in explorer)  All the commands below that 
+start with a $ are intended to be run under your bash shell
+
+These directions assume that you install directories in you user directory 
+on the PC..  If you want to locate the repo's in another location then go ahead 
+but the support from me will not be as good as if you follow the directions.
+
+Create dirs to hold the compiler and your lab directory
+    $ cd ~
+    $ mkdir bin
+    $ mkdir src
+
+Install the class repo into your src directory
+    $ cd ~/src
+    $ git clone https://github.com/milhead2/cs466_s17.git
+
+Download and install the compiler for your windows target from 
+    https://launchpad.net/gcc-arm-embedded
+
+Download and install the make tool for your computer
+    http://gnuwin32.sourceforge.net/packages/make.htm
+
+Unzip the flash_utility.zip file in the TivaDriver directory then copy the 
+resulting LMFlash.exe executable to your ~/bin directory.
+
+When you run the install you may want to pick a new directory (like
+in your newly created bin).  It also makes adding the directory to your 
+path easier.
+
+If you use the default location (wuth spaces and '()' characters the 
+line to add the directory to your bash path is a little more tricky.
+
+The lines below is from a .bashrc that I put into my user directory on my PC.
+
+    alias h=history
+
+    alias ls='ls -F'
+    alias ll='ls -lF'
+
+    export PATH=$PATH:/c/Users/miller/bin
+    export PATH=$PATH:/c/Users/miller/bin/GnuWin32/bin
+    export PATH=$PATH:/c/Users/miller/src/gcc-arm-4.9-2015q3/bin
+
+
+Putting the paths here keeps them out of the already polluted paths on 
+most PC's They will only be searched when you are building your lab 
+projects under the git bash shell.
+
+
+after you edit and save the file re-source your environment to get the 
+modified path in your current seatch path
+
+    $ . ~/.bashrc
+
+Now to test that the compiler is installed in your path try running the
+C compiler with no input files, It should give the error message below:
+
+    $ arm-none-eabi-gcc
+    eabi-gcc: fatal error: no input files
+    compilation terminated.
+
+Change directory to the lab01 directory.
+
+    $ cd ~/src/cs466_s17/lab/lab01
+
+At this point you should be able to compile and flash the provided code.
+
+    'make' will remake the code and not reload it.
+    'make flash' will build the image and flash the tiva board.
+
+    $ make
+    $ make flash
+
+I'm not sure why but 'make flash' will not work on a new project, 
+You have to run a 'make' at least once on a new directory or on a 
+directlry that has been cleaned.
+
+The directions to compile openocd so that it works with ICDI are coming...
+
+

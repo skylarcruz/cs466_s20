@@ -1,0 +1,62 @@
+1/19/2017 Linux CentOS setup for cs466 code.
+(All the '$' commands are from the Bash Terminal)
+
+Create dirs to hold the compiler and your lab directory
+    $ cd ~
+    $ mkdir bin
+    $ mkdir src
+
+Clone the lab repo into your src directory
+    $ cd ~/src
+    $ git clone https://github.com/milhead2/cs466_s17.git
+
+There is a compiler already installed as part of the school system 
+you need to make sure that it is in your path.  Edit your ~/.bashrc
+file and make sure that it has the following line.
+
+  export PATH=$PATH:/usr/local/src/gcc-arm-none-eabi-4_9-2014q4/bin
+
+after you edit and save the file re-source your environment to get the 
+modified path in your current seatch path
+
+    $ . ~/.bashrc
+
+Now to test that the compiler is installed in your path try running the
+C compiler with no input files, It should give the error message below:
+
+    $ arm-none-eabi-gcc
+    eabi-gcc: fatal error: no input files
+    compilation terminated.
+
+Change directory to the lab01 directory.
+
+    $ cd ~/src/cs466_s17/lab/lab01
+
+At this point you should be able to compile and flash the provided code.
+
+    'make' will remake the code and not reload it.
+    'make flash' will build the image and flash the tiva board.
+
+    $ make
+    $ make flash
+
+I'm not sure why but 'make flash' will not work on a new project, 
+You have to run a 'make' at least once on a new directory or on a 
+directlry that has been cleaned.
+
+If you can compile, have the lm4flash executable but have to run 'make flash' as root, the issue 
+is that the protections of the ICDI device are not available to users.   The following commands should allow 
+you to access the device as a user and not require root access.
+
+$ sudo cat > /etc/udev/rules.d/99-tiva-launchpad.rules 
+ATTRS{idVendor}=="1cbe", ATTRS{idProduct}=="00fd", ENV{ID_MM_DEVICE_IGNORE}="1"
+ATTRS{idVendor}=="1cbe", ATTRS{idProduct}=="00fd", ENV{MTP_NO_PROBE}="1"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1cbe", ATTRS{idProduct}=="00fd", MODE="0666", SYMLINK+="tiva"
+KERNEL=="ttyACM*", ATTRS{idVendor}=="1cbe",ATTRS{idProduct}=="00fd", MODE="0666"
+$ sudo udevadm control --reload-rules
+$ sudo udevadm trigger
+
+
+
+The directions to compile openocd so that it works with ICDI are coming...
+

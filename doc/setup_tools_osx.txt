@@ -1,0 +1,65 @@
+1/14/2017 Mac OSX setup for cs466 code.
+(All the '$' commands are from the Bash Terminal)
+
+I worked this up on OS X Yosemite, Your mileage may vary
+
+Install xcode:   http://railsapps.github.io/xcode-command-line-tools.html
+
+Create dirs to hold the compiler and your lab directory
+   $ cd ~
+   $ mkdir bin
+   $ mkdir src
+
+Clone the lab repo into your src directory
+   $ cd ~/src
+   $ git clone https://github.com/milhead2/cs466_s17.git
+
+Get Compiler for your target: https://launchpad.net/gcc-arm-embedded
+  $ ls ../Downloads/gcc* 
+       ../Downloads/gcc-arm-none-eabi-5_4-2016q3-20160926-mac.tar.bz2
+   $ bzip2 -d ../Downloads/gcc-arm-none-eabi-5_4-2016q3-20160926-mac.tar.bz2
+   $ cd ~/bin
+   $ tar xvf ../Downloads/gcc-arm-none-eabi-5_4-2016q3-20160926-mac.tar
+
+Setup some generic helpers and modify your path to include the compiler bin directory
+   $ cat >> ~/.bashrc
+   alias ls='ls -F'
+   alias ll='ls -Fl'
+   alias h=history
+   export PATH=$PATH:~/bin/gcc-arm-none-eabi-5_4-2016q3/bin/
+
+Need lm4flash utility:  
+   $ cd ~/src
+   $ git clone https://github.com/utzig/lm4tools.git
+
+Install Brew:
+   $ /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+
+Install libusb:
+   $ brew install libusb
+
+Install pkg-config
+   $ brew install pkg-config
+
+Should be able to compile lm4flash
+   $ cd ~/src/lm4tools/lm4flash/
+   $ make
+
+Move a copy of the new lm4flash utility to a dir that we already have in the search path
+   $ cp lm4flash ~/bin/gcc-arm-none-eabi-5_4-2016q3/bin/
+
+Should be able to compile and flash the lab01 blinky program (plug in your Tiva)
+   $ cd ~/src/cs466_s17/lab/lab01/
+   $ make
+   $ make flash
+
+'make' will remake the code and not reload it.
+'make flash' will build the image and flash the tiva board.
+
+I'm not sure why but 'make flash' will not work on a new project, 
+You have to run a 'make' at least once on a new directory or on a 
+directlry that has been cleaned.
+
+The directions to compile openocd so that it works with ICDI are next...
+
+
