@@ -53,7 +53,7 @@ clean:
 #
 # Rules for building the application
 #
-${COMPILER}/${TARGET}.axf: ${COMPILER}/blinky_final.o
+${COMPILER}/${TARGET}.axf: ${COMPILER}/blinky.o
 ${COMPILER}/${TARGET}.axf: ${COMPILER}/startup_${COMPILER}.o
 
 #
