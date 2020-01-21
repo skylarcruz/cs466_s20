@@ -1,0 +1,8 @@
+*.o
+gcc
+FreeRTOS*
+TivaDriver
+*.bin
+*.map
+*.axf
+*.lst

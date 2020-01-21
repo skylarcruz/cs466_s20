@@ -3,7 +3,7 @@ PART=TM4C123GH6PM
 TARGET=blinkyRTOS
 
 TIVA=../../TivaDriver
-FREERTOS=../../FreeRTOSv10.1.1/FreeRTOS/Source
+FREERTOS=../../FreeRTOSv10.2.1_191129/FreeRTOS/Source
 
 SIZE=arm-none-eabi-size
 
