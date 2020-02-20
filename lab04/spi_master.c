@@ -28,21 +28,25 @@
 
 // the three tiva LED'a are attached to GPIO
 // port F at pind 1, 2, 3
-//#define LED_R (1<<1)
-//#define LED_B (1<<2)
-#define LED_G (1<<3)
+#define LED_R (1<<1) // PF1
+#define LED_B (1<<2) // PF2
+#define LED_G (1<<3) // PF3
+#define SPI_SWI (1<<4) // PF4
 
 //Moved Pins
-#define SPI_CS (1<<2) //PF2
+//#define SPI_CS (1<<2) //PF2
 
 // output
 #define SPI_RESET (1<<0) //PD0
-//#define SPI_CS (1<<1) //PD1
+#define SPI_CS (1<<1) //PD1
 #define SPI_SCK (1<<2) //PD2
 #define SPI_SI (1<<3) //PD3
 
 // input
 #define SPI_SO (1<<6) //PD6
+
+// interrupt
+#define SPI_INT (1<<0) //PB0
 
 #define LED_ON(x) (GPIO_PORTF_DATA_R |= (x))
 #define LED_OFF(x) (GPIO_PORTF_DATA_R &= ~(x))
@@ -53,6 +57,8 @@
 
 uint32_t SystemCoreClock;
 
+int timer;
+
 #ifdef USB_SERIAL_OUTPUT
 
 #ifdef DEBUG
@@ -62,6 +68,30 @@ __error__(char *pcFilename, uint32_t ui32Line)
 	_assert_failed ("__error__", pcFilename, ui32Line);
 }
 #endif
+
+void
+delayUs(uint32_t us)
+{
+    while(us--)
+    {
+        __asm("    nop\n"
+              "    nop\n"
+              "    nop\n");
+    }
+}
+
+//
+// This is a Very poor delay method.. Will delay appx 1ms.
+// Probably inaccurate
+//
+void
+delayMs(uint32_t ms)
+{
+    while(ms--)
+    {
+        delayUs(1000);
+    }
+}
 
 void setMOSI(uint8_t val)
 {
@@ -100,11 +130,11 @@ static uint8_t expanderRead(uint8_t address)
 {
     uint8_t value, preRead = 0x41;
 
-    GPIO_PORTF_DATA_R &= ~SPI_CS;
+    GPIO_PORTD_DATA_R &= ~SPI_CS;
     transfer(preRead);
     transfer(address);
     value = transfer(0);
-    GPIO_PORTF_DATA_R |= SPI_CS;
+    GPIO_PORTD_DATA_R |= SPI_CS;
 
     return value;
 }
@@ -113,16 +143,60 @@ static void expanderWrite(uint8_t address, uint8_t data)
 {
     uint8_t value, preRead = 0x40;
 
-    GPIO_PORTF_DATA_R &= ~SPI_CS;
+    GPIO_PORTD_DATA_R &= ~SPI_CS;
     transfer(preRead);
     transfer(address);
     transfer(data);
-    GPIO_PORTF_DATA_R |= SPI_CS;
+    GPIO_PORTD_DATA_R |= SPI_CS;
 }
 
 static void expanderInit(){
 	uint8_t IODIRA = 0x00;
-	expanderWrite(IODIRA, 0xFE); // Sets GPIO A0 to output
+	expanderWrite(IODIRA, 0xFE); // Sets GPIO A0 to output; 1 = input; 0 = output
+
+	uint8_t IODIRB = 0x01;
+	uint8_t GPPUB = 0x0D;
+	uint8_t GPINTENB = 0x05;
+	uint8_t DEFVALB = 0x07;
+	uint8_t INTCONB = 0x09;
+
+	expanderWrite(IODIRB, 0x04); // set GPIOB2 to input; GPIOB1 to output
+	expanderWrite(GPPUB, 0x04); // enables internal pullup for GPIO B2
+
+	expanderWrite(GPINTENB, 0x04); // enables interrupt on GPIOB1
+	expanderWrite(INTCONB, 0x04);
+	expanderWrite(DEFVALB, 0x04);
+}
+
+static void
+_interruptHandlerPortB(void)
+{
+	UARTprintf("Entered Interrupt\n");
+	GPIO_PORTB_DATA_R &= ~SPI_INT;
+    //
+    // We have not woken a task at the start of the ISR.
+    //
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+
+    uint32_t mask = GPIOIntStatus(GPIO_PORTB_BASE, 1);
+
+    if (mask & (GPIO_PORTB_DATA_R & 0x01))
+    {
+    	expanderRead(0x13);
+        GPIO_PORTF_DATA_R |= LED_B;
+        //delayMs(5000);
+        GPIO_PORTF_DATA_R &= ~LED_B;
+
+    }
+
+    if (xHigherPriorityTaskWoken)
+    {
+        // should request a schedule update....  
+        // ....stay tuned
+    }    
+
+    GPIOIntClear(GPIO_PORTB_BASE, mask);
 }
 
 //*****************************************************************************
@@ -169,15 +243,20 @@ _setupHardware(void)
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
 
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+
     // Enable the GPIO pin for the LED (PF3).  Set the direction as output, and
     // enable the GPIO pin for digital function.
     // These are TiveDriver library functions
     //
-    GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, (LED_G| SPI_CS));
+    GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, (LED_G | LED_B | LED_R));
+    GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, (SPI_SWI));
 
-    GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, (SPI_RESET | SPI_SCK | SPI_SI));
-
+    GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, (SPI_RESET | SPI_CS | SPI_SCK | SPI_SI));
     GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, SPI_SO);
+
+    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, (SPI_INT));
+    //GPIOPadConfigSet(GPIO_PORTB_BASE, SPI_INT, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
 
     SystemCoreClock = 80000000;  // Required for FreeRTOS.
 
@@ -193,16 +272,33 @@ _heartbeat( void *notUsed )
 {
     uint32_t greenMs = 500 / portTICK_RATE_MS;
     uint32_t ledOn = 0;
-    uint8_t address = 0x03;
-    uint8_t data = 0x2F;
+    // uint8_t address = 0x03;
+    // uint8_t data = 0x2F;
     uint8_t readVal;
+
+    GPIOIntTypeSet(GPIO_PORTB_BASE, SPI_INT, GPIO_RISING_EDGE);
+    GPIOIntRegister(GPIO_PORTB_BASE, _interruptHandlerPortB);
+    IntPrioritySet(INT_GPIOB, 255);
+    GPIOIntEnable(GPIO_PORTB_BASE, SPI_INT);
+
+    //GPIO_PORTD_DATA_R &= ~SPI_INT;
 
     while(1)
     {
         ledOn = !ledOn;
         LED(LED_G, ledOn);
 
-        vTaskDelay(greenMs);
+        //GPIO_PORTB_DATA_R &= 0x00;
+        UARTprintf("PortB: %X\n", GPIO_PORTB_DATA_R);
+
+        readVal = expanderRead(0x13);
+        //readVal = expanderRead(0x11);
+        //expanderRead(0x13);
+        //UARTprintf("readVal: %X\n", readVal);
+
+        // LED(LED_R, (~(expanderRead(0x13)) & (1<<2)));
+
+        vTaskDelay(200);
     }
 
 }
@@ -227,10 +323,7 @@ _heartbeatExpand( void *notUsed )
         // else
         // 	expanderWrite(0x14, 0x00);
 
-        readVal = expanderRead(0x12);
-        UARTprintf("readVal: %X\n", readVal);
-
-        vTaskDelay(greenMs);
+        vTaskDelay(200);
     }
 
 }
@@ -254,17 +347,17 @@ int main( void )
                 tskIDLE_PRIORITY,
                 NULL );
 
-    xTaskCreate(_heartbeatExpand,
-                "heartbeatExpand",
-                configMINIMAL_STACK_SIZE,
-                NULL,
-                tskIDLE_PRIORITY,
-                NULL );
+    // xTaskCreate(_heartbeatExpand,
+    //             "heartbeatExpand",
+    //             configMINIMAL_STACK_SIZE,
+    //             NULL,
+    //             tskIDLE_PRIORITY,
+    //             NULL );
 
     GPIO_PORTD_DATA_R &= ~SPI_RESET;
     GPIO_PORTD_DATA_R |= SPI_RESET;
 
-    GPIO_PORTF_DATA_R |= SPI_CS;
+    GPIO_PORTD_DATA_R |= SPI_CS;
 
     expanderInit();
 
