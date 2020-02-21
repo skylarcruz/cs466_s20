@@ -58,6 +58,8 @@
 uint32_t SystemCoreClock;
 
 int btimer;
+int bounceTimer;
+int pressCount;
 
 #ifdef USB_SERIAL_OUTPUT
 
@@ -165,8 +167,8 @@ static void expanderInit(){
 	expanderWrite(GPPUB, 0x04); // enables internal pullup for GPIO B2
 
 	expanderWrite(GPINTENB, 0x04); // enables interrupt on GPIOB2
-	expanderWrite(INTCONB, 0x04); // set pin 4
-	expanderWrite(DEFVALB, 0x04);
+	//expanderWrite(INTCONB, 0x04); // set pin 4
+	//expanderWrite(DEFVALB, 0x04);
 
 	//expanderWrite(IOCONB, 0x01);
 }
@@ -175,26 +177,24 @@ static void
 _interruptHandlerPortB(void)
 {
 	UARTprintf("Entered Interrupt\n");
-	//expanderRead(0x13);
-	//GPIO_PORTB_DATA_R &= ~SPI_INT;
-    //
-    // We have not woken a task at the start of the ISR.
-    //
+	if(bounceTimer > 0)
+		pressCount++;
+	else
+
+	bounceTimer = 5;
+
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
 
     uint32_t mask = GPIOIntStatus(GPIO_PORTB_BASE, 1);
 
-    if (mask  & (~GPIO_PORTB_DATA_R & (1<<0)))
+    if ((mask  & (~GPIO_PORTB_DATA_R & (1<<0)) && pressCount == 0))
     {
     	UARTprintf("Entered Interrupt Phase 2\n");
     	LED(LED_B , 1);
+    	delayMs(1);
+    	LED(LED_B , 0);
     	btimer = 100;
-    	//delayMs(1000);
-        // GPIO_PORTF_DATA_R |= LED_B;
-        // delayMs(5000);
-        // GPIO_PORTF_DATA_R &= ~LED_B;
-
     }
 
     if (xHigherPriorityTaskWoken)
@@ -203,9 +203,9 @@ _interruptHandlerPortB(void)
         // ....stay tuned
     }
 
-    expanderRead(0x13);
     GPIOIntClear(GPIO_PORTB_BASE, mask);
     expanderRead(0x13);
+    UARTprintf("Button press Count: %d\n", pressCount);
 }
 
 //*****************************************************************************
@@ -287,11 +287,6 @@ _heartbeat( void *notUsed )
 
     int gtimer = 100;
 
-    GPIOIntTypeSet(GPIO_PORTB_BASE, SPI_INT, GPIO_FALLING_EDGE);
-    GPIOIntRegister(GPIO_PORTB_BASE, _interruptHandlerPortB);
-    IntPrioritySet(INT_GPIOB, 255);
-    GPIOIntEnable(GPIO_PORTB_BASE, SPI_INT);
-
     //GPIO_PORTD_DATA_R &= ~SPI_INT;
 
     //expanderRead(0x13);
@@ -306,13 +301,6 @@ _heartbeat( void *notUsed )
         	gtimer = 100;
     	}
 
-    	if(btimer > 0)
-    		btimer--;
-    	else {
-    		LED(LED_B, 0);
-    		//expanderRead(0x13);
-    	}
-
         //GPIO_PORTB_DATA_R &= 0x00;
         //UARTprintf("PortB: %X\n", GPIO_PORTB_DATA_R);
 
@@ -323,7 +311,29 @@ _heartbeat( void *notUsed )
 
         // LED(LED_R, (~(expanderRead(0x13)) & (1<<2)));
 
-        //vTaskDelay(2);
+        vTaskDelay(2);
+    }
+
+}
+
+static void
+_timers( void *notUsed )
+{
+
+    GPIOIntTypeSet(GPIO_PORTB_BASE, SPI_INT, GPIO_FALLING_EDGE);
+    GPIOIntRegister(GPIO_PORTB_BASE, _interruptHandlerPortB);
+    IntPrioritySet(INT_GPIOB, 255);
+    GPIOIntEnable(GPIO_PORTB_BASE, SPI_INT);
+
+    while(1)
+    {
+
+    	if(bounceTimer > 0)
+    		bounceTimer--;
+    	else
+    		pressCount = 0;
+
+        vTaskDelay(2);
     }
 
 }
@@ -375,6 +385,13 @@ int main( void )
 
     xTaskCreate(_heartbeat,
                 "heartbeat",
+                configMINIMAL_STACK_SIZE,
+                NULL,
+                tskIDLE_PRIORITY,
+                NULL );
+
+    xTaskCreate(_timers,
+                "timers",
                 configMINIMAL_STACK_SIZE,
                 NULL,
                 tskIDLE_PRIORITY,

@@ -1,0 +1,29 @@
+Q1. a0, a1, a2 provide address configuration, allowing connections up to 8 different GPIO expanders of the same kind
+
+Q2. It means more input output ports, great expansion, and confusing configuration. The Tiva board has limited ports and this plus other expanders greatly increases the possibilities for I/O.
+
+Q3. The bank bit configures how the addresses are mapped. When the bank bit is set to 0, the A and B registers are paired, which is the configuration we used for this lab. With it set to 1, the registers are segretated with A registers taking the lower addresses and B the higher addresses.
+
+Q4. To trigger the LED on the expander, it requires transfering 3 bytes. 1 to set the mode (write), another to target the address of GPIO B, and another to set the value. the MOSI must be set 1 bit at a time. These are transfered in time with the Serial Clock Input of the SPI chip. All of these factors limit the speed at which we can trigger our external LED.
+
+Q5. We verified that all other pins were unaffected by reading the data through an SPI read. All other pins were set to output and remained at 0.
+
+Q6. This resistor provides a high signal to the input. when the button connected to ground is pressed, this acts as a drain, giving the input port a low signal. Without this resistor, the input would always be 0. The best reason for using the internal is to save cost and physical space.
+
+Q7. This GPIO expander requires a read to either the GPIO port that the interrupt was triggered on or a read to it's INTCAP register.
+
+Q8. The SPI standard has been "de facto" since the 1980s when they were first developed by Motorola. As it is standardized, we can expect most SPI devices to work similarly. Of course the datasheet should always be read and understood in detail.
+
+Q9. We got roughly 3.3 ms of latency between the time of button press and the masking of the interrupt on both devices. Part of this latency is due to the delay we gave between an LED flashing on and off (used to generate a square wave on an oscilloscope). By reducing this delay, we can decrease the latency.
+
+Q10. steps from button-press to ISR clearing the Tiva/GPIO Interrupt:
+	1. Button is pressed, draining the signal and driving the GPIO B port low
+	2. On edge trigger, the GPIO expander interrupt is sent to the Tiva board
+	3. The Tiva board picks the signal up from port PB0
+	4. This is set as the interrupt on our Tiva board, our interrupt task is triggered.
+	5. An LED is flashed on, we delay for a short time (5 ms)
+	6. the LED is turned off
+	7. We mask the interrupt on the Tiva board using a Tiva function
+	8. We mask the expander interrupt by reading the GPIO Port
+
+Q11. As the interupt is being scheduled alongside other tasks, having multiple tasks running concurrently would increase the latency of our interupt. Each task would need to be scheduled by FreeRTOS which would happen during the interrupt.
