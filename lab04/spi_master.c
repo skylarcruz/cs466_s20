@@ -57,7 +57,7 @@
 
 uint32_t SystemCoreClock;
 
-int timer;
+int btimer;
 
 #ifdef USB_SERIAL_OUTPUT
 
@@ -159,20 +159,24 @@ static void expanderInit(){
 	uint8_t GPINTENB = 0x05;
 	uint8_t DEFVALB = 0x07;
 	uint8_t INTCONB = 0x09;
+	uint8_t IOCONB = 0x0B;
 
-	expanderWrite(IODIRB, 0x04); // set GPIOB2 to input; GPIOB1 to output
+	expanderWrite(IODIRB, 0x04); // set GPIOB2 to input;
 	expanderWrite(GPPUB, 0x04); // enables internal pullup for GPIO B2
 
-	expanderWrite(GPINTENB, 0x04); // enables interrupt on GPIOB1
-	expanderWrite(INTCONB, 0x04);
+	expanderWrite(GPINTENB, 0x04); // enables interrupt on GPIOB2
+	expanderWrite(INTCONB, 0x04); // set pin 4
 	expanderWrite(DEFVALB, 0x04);
+
+	//expanderWrite(IOCONB, 0x01);
 }
 
 static void
 _interruptHandlerPortB(void)
 {
 	UARTprintf("Entered Interrupt\n");
-	GPIO_PORTB_DATA_R &= ~SPI_INT;
+	//expanderRead(0x13);
+	//GPIO_PORTB_DATA_R &= ~SPI_INT;
     //
     // We have not woken a task at the start of the ISR.
     //
@@ -181,12 +185,15 @@ _interruptHandlerPortB(void)
 
     uint32_t mask = GPIOIntStatus(GPIO_PORTB_BASE, 1);
 
-    if (mask & (GPIO_PORTB_DATA_R & 0x01))
+    if (mask  & (~GPIO_PORTB_DATA_R & (1<<0)))
     {
-    	expanderRead(0x13);
-        GPIO_PORTF_DATA_R |= LED_B;
-        //delayMs(5000);
-        GPIO_PORTF_DATA_R &= ~LED_B;
+    	UARTprintf("Entered Interrupt Phase 2\n");
+    	LED(LED_B , 1);
+    	btimer = 100;
+    	//delayMs(1000);
+        // GPIO_PORTF_DATA_R |= LED_B;
+        // delayMs(5000);
+        // GPIO_PORTF_DATA_R &= ~LED_B;
 
     }
 
@@ -194,9 +201,11 @@ _interruptHandlerPortB(void)
     {
         // should request a schedule update....  
         // ....stay tuned
-    }    
+    }
 
+    expanderRead(0x13);
     GPIOIntClear(GPIO_PORTB_BASE, mask);
+    expanderRead(0x13);
 }
 
 //*****************************************************************************
@@ -256,7 +265,7 @@ _setupHardware(void)
     GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, SPI_SO);
 
     GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, (SPI_INT));
-    //GPIOPadConfigSet(GPIO_PORTB_BASE, SPI_INT, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
+    GPIOPadConfigSet(GPIO_PORTB_BASE, SPI_INT, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
 
     SystemCoreClock = 80000000;  // Required for FreeRTOS.
 
@@ -276,29 +285,45 @@ _heartbeat( void *notUsed )
     // uint8_t data = 0x2F;
     uint8_t readVal;
 
-    GPIOIntTypeSet(GPIO_PORTB_BASE, SPI_INT, GPIO_RISING_EDGE);
+    int gtimer = 100;
+
+    GPIOIntTypeSet(GPIO_PORTB_BASE, SPI_INT, GPIO_FALLING_EDGE);
     GPIOIntRegister(GPIO_PORTB_BASE, _interruptHandlerPortB);
     IntPrioritySet(INT_GPIOB, 255);
     GPIOIntEnable(GPIO_PORTB_BASE, SPI_INT);
 
     //GPIO_PORTD_DATA_R &= ~SPI_INT;
 
+    //expanderRead(0x13);
+
     while(1)
     {
-        ledOn = !ledOn;
-        LED(LED_G, ledOn);
+    	if(gtimer > 0)
+    		gtimer--;
+    	else{
+    		ledOn = !ledOn;
+        	LED(LED_G, ledOn);
+        	gtimer = 100;
+    	}
+
+    	if(btimer > 0)
+    		btimer--;
+    	else {
+    		LED(LED_B, 0);
+    		//expanderRead(0x13);
+    	}
 
         //GPIO_PORTB_DATA_R &= 0x00;
-        UARTprintf("PortB: %X\n", GPIO_PORTB_DATA_R);
+        //UARTprintf("PortB: %X\n", GPIO_PORTB_DATA_R);
 
-        readVal = expanderRead(0x13);
+        //readVal = expanderRead(0x13);
         //readVal = expanderRead(0x11);
         //expanderRead(0x13);
         //UARTprintf("readVal: %X\n", readVal);
 
         // LED(LED_R, (~(expanderRead(0x13)) & (1<<2)));
 
-        vTaskDelay(200);
+        //vTaskDelay(2);
     }
 
 }
@@ -338,7 +363,15 @@ int main( void )
 	void spinDelayMs(uint32_t ms);
 	_configureUART();
 	spinDelayMs(1000);  // Allow UART to setup
+	UARTprintf("RESET\n");
 #endif
+
+	GPIO_PORTD_DATA_R &= ~SPI_RESET;
+    GPIO_PORTD_DATA_R |= SPI_RESET;
+
+    GPIO_PORTD_DATA_R |= SPI_CS;
+
+	expanderInit();
 
     xTaskCreate(_heartbeat,
                 "heartbeat",
@@ -353,13 +386,6 @@ int main( void )
     //             NULL,
     //             tskIDLE_PRIORITY,
     //             NULL );
-
-    GPIO_PORTD_DATA_R &= ~SPI_RESET;
-    GPIO_PORTD_DATA_R |= SPI_RESET;
-
-    GPIO_PORTD_DATA_R |= SPI_CS;
-
-    expanderInit();
 
     /* Start the tasks and timer running. */
     vTaskStartScheduler();
