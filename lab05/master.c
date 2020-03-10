@@ -110,15 +110,18 @@ uint8_t getMISO(){
 uint8_t transfer(uint8_t out)
 {
     uint8_t count, in = 0;
+    int MsCount = 150;
 
     for (count = 0; count < 8; count++)
     {
         in <<= 1;
         setMOSI(out & 0x80);
-	delayMs(10);
+
+	vTaskDelay(MsCount/portTICK_RATE_MS);
         GPIO_PORTD_DATA_R |= SPI_SCK;
+	
         in += getMISO();
-	delayMs(10);
+	vTaskDelay(MsCount/portTICK_RATE_MS);
         GPIO_PORTD_DATA_R &= ~SPI_SCK;
         out <<= 1;
     }
@@ -130,12 +133,17 @@ uint8_t transfer(uint8_t out)
 static uint8_t byteRead(uint8_t address)
 {
     uint8_t firstByte, value, command = 0xA0;
-    
-    firstByte = command + address;		
+    int MsCount = 150;
 
+
+    firstByte = command | address;		
+    
+    vTaskDelay(MsCount/portTICK_RATE_MS);
     GPIO_PORTD_DATA_R &= ~SPI_CS;    //add 10ms delays in read function too?
     transfer(firstByte);
     value = transfer(0);
+
+    vTaskDelay(MsCount/portTICK_RATE_MS);
     GPIO_PORTD_DATA_R |= SPI_CS;
 
     return value;
@@ -143,17 +151,21 @@ static uint8_t byteRead(uint8_t address)
 
 static void byteWrite(uint8_t address, uint8_t data)		//write command is 0xb_
 {
-    uint8_t firstByte, command = 0xb0;
+    uint8_t firstByte, command = 0xF0;
+    int MsCount = 150;
 
-    firstByte =  command + address;		//<---- any problems with this? to concatenate the address to the command?
-
+    firstByte =  command | address;		//<---- any problems with this? to concatenate the address to the command?
+    vTaskDelay(MsCount/portTICK_RATE_MS);
     GPIO_PORTD_DATA_R &= ~SPI_CS;
-    delayMs(10);
+    UARTprintf("CS LOW\n");
+    
     transfer(firstByte);
-    delayMs(10);
+    
     transfer(data);
-    delayMs(10);
+    vTaskDelay(MsCount/portTICK_RATE_MS);
     GPIO_PORTD_DATA_R |= SPI_CS;
+    UARTprintf("CS HIGH\n");
+    
 }
 
 
@@ -240,7 +252,7 @@ _heartbeat( void *notUsed )
     	ledOn = !ledOn;
         LED(LED_G, ledOn);
     	
-        vTaskDelay(greenMs/portTICK_RATE_MS);
+        vTaskDelay(greenMs);
     }
 
 }
@@ -261,14 +273,14 @@ _RedHeartbeat( void *notUsed )
 
 	if(rledOn == 1)
 	{
-		slaveRed = 0x04;	//0x0000.0100 for RED led
+		slaveRed = 0x0F;	//0x0000.0100 for RED led
 	}
 	else 
 	{
-		slaveRed = 0x00;
+		slaveRed = 0x0F;
 	}
-
-	byteWrite(0x01,slaveRed); 
+	
+	byteWrite(0x06,slaveRed); 
 
         vTaskDelay(redMs);
     }
