@@ -38,6 +38,11 @@
 #define SLA_SCK (1<<1) //PB1
 #define SLA_SO (1<<0) //PB0
 
+#define SLA_LED_B (1<<0)
+#define SLA_LED_R (1<<1)
+#define SLA_LED_G (1<<2)
+
+
 
 #define LED_ON(x) (GPIO_PORTF_DATA_R |= (x))
 #define LED_OFF(x) (GPIO_PORTF_DATA_R &= ~(x))
@@ -292,6 +297,7 @@ uint8_t transferSlave(uint8_t out)
 uint8_t transferSCKLow(uint8_t out, uint8_t in)
 {
     setMISO(out & 0x80);
+    //UARTprintf("bit out: %X\n", out & 0x80);
     out <<= 1;
     return out;
 }
@@ -347,7 +353,7 @@ _slave( void *pvParameters )
 	        if (slaveState == IDLE){
 	        	// CS Low
 	        	if(val == 0x01){
-		    		//UARTprintf("CS LOW\n");
+		    		UARTprintf("CS LOW\n");
 		    		if(slaveState == IDLE){
 		    			//UARTprintf("Command entered\n");
         				slaveState = COMMAND;
@@ -371,7 +377,7 @@ _slave( void *pvParameters )
 	    			  if (outCounter >= 8){
 	    			  	command = (in & 0xF0) >> 4;
 	    			  	addr = in & 0x0F;
-	    			  	//UARTprintf("address: %X\n", addr);
+	    			  	//UARTprintf("command: %X\n", command);
 	    			  	if(command == 0x0b){
 	    			  		if(addr == 0x01 || addr == 0x02 || addr == 0x03)
 	    			  			slaveState = WRITE_REG;
@@ -467,7 +473,7 @@ _slave( void *pvParameters )
 	    			dataOut = transferSCKLow(dataOut, in);
 	    		}
 	    		else if(val == 0x00){
-	    			UARTprintf("Error: CS went High\n");
+	    			//UARTprintf("Error: CS went High\n");
 	    			slaveState = DONE;
 	    		}
 	        }
@@ -572,6 +578,8 @@ _setLEDs( void *notUsed ){
 			GPIO_PORTF_DATA_R |= LED_G;
 		else
 			GPIO_PORTF_DATA_R &= ~LED_G;
+
+        UARTprintf("LED: %X\n", GPIO_PORTF_DATA_R);
 
 		//vTaskDelay(10);
 	}

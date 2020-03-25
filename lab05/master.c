@@ -33,6 +33,10 @@
 #define LED_G (1<<3) // PF3
 #define SPI_SWI (1<<4) // PF4
 
+#define SLA_LED_B (1<<0)
+#define SLA_LED_R (1<<1)
+#define SLA_LED_G (1<<2)
+
 //Moved Pins
 //#define SPI_CS (1<<2) //PF2
 
@@ -127,14 +131,14 @@ uint8_t transfer(uint8_t out)
         setMOSI(out & 0x80);
 	//UARTprintf("MOSI = %d\n",(out & 0x80));
 
-	//vTaskDelay(MsCount);
+	vTaskDelay(MsCount);
         delayUs(1400);
 	
 	GPIO_PORTD_DATA_R |= SPI_SCK;
 	
         in += getMISO();
 	//UARTprintf("MISO = %d\n",(in & 0x01));
-	//vTaskDelay(MsCount);
+	vTaskDelay(MsCount);
         delayUs(1400);
 	
 	GPIO_PORTD_DATA_R &= ~SPI_SCK;
@@ -306,18 +310,18 @@ _RedHeartbeat( void *notUsed )
 	if(rledOn == 1)
 	{
 		//slaveRed = 0x0F;	//0x0000.0100 for RED led
-	 	byteWrite(0x01,0x02);
-  		//SlaveData = byteRead(0x02);
+	 	byteWrite(0x01, SLA_LED_B);
+  		SlaveData = byteRead(0x02);
 
-		//UARTprintf("SlaveOut = %x\n", SlaveData);
+		UARTprintf("SlaveOut = %x\n", SlaveData);
 	}
 	else 
 	{
 		//slaveRed = 0x0F;
 		byteWrite(0x01,0x00);
 		
-		//SlaveData = byteRead(0x01);
-		//UARTprintf("SlaveOut = %x\n", SlaveData);
+		SlaveData = byteRead(0x01);
+		UARTprintf("SlaveOut = %x\n", SlaveData);
 	}
 	
 	//byteWrite(0x06,slaveRed); 
