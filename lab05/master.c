@@ -98,34 +98,49 @@ void setMOSI(uint8_t val)
         GPIO_PORTD_DATA_R |= SPI_SI;
     else // else if 0 bit
         GPIO_PORTD_DATA_R &= ~SPI_SI;
+    //UARTprintf("MOSI Value = %d\n", (val & 0x80));
 }
 
 uint8_t getMISO(){
     if (GPIO_PORTD_DATA_R & SPI_SO)
-        return 1;
+    {
+    //UARTprintf("MISO value = 1\n");
+    return 1;
+    }
     else
+    {
+	//UARTprintf("MISO value = 0\n");
         return 0;
+    }
 }
 
 uint8_t transfer(uint8_t out)
 {
     uint8_t count, in = 0;
-    int MsCount = 150;
+    int MsCount = 1/portTICK_RATE_MS;
+
+    int intdelay = MsCount/portTICK_RATE_MS/2;
 
     for (count = 0; count < 8; count++)
     {
         in <<= 1;
         setMOSI(out & 0x80);
+	//UARTprintf("MOSI = %d\n",(out & 0x80));
 
-	vTaskDelay(MsCount/portTICK_RATE_MS);
-        GPIO_PORTD_DATA_R |= SPI_SCK;
+	//vTaskDelay(MsCount);
+        delayUs(1400);
+	
+	GPIO_PORTD_DATA_R |= SPI_SCK;
 	
         in += getMISO();
-	vTaskDelay(MsCount/portTICK_RATE_MS);
-        GPIO_PORTD_DATA_R &= ~SPI_SCK;
+	//UARTprintf("MISO = %d\n",(in & 0x01));
+	//vTaskDelay(MsCount);
+        delayUs(1400);
+	
+	GPIO_PORTD_DATA_R &= ~SPI_SCK;
         out <<= 1;
     }
-    setMOSI(0);
+    //setMOSI(0);
 
     return (in);
 }
@@ -133,38 +148,53 @@ uint8_t transfer(uint8_t out)
 static uint8_t byteRead(uint8_t address)
 {
     uint8_t firstByte, value, command = 0xA0;
-    int MsCount = 150;
-
+    int MsCount = 5;
 
     firstByte = command | address;		
     
-    vTaskDelay(MsCount/portTICK_RATE_MS);
     GPIO_PORTD_DATA_R &= ~SPI_CS;    //add 10ms delays in read function too?
+    UARTprintf("CS LOW\n");
+
+    vTaskDelay(MsCount/portTICK_RATE_MS);
+
     transfer(firstByte);
+
+    vTaskDelay(10/portTICK_RATE_MS);
+
     value = transfer(0);
 
-    vTaskDelay(MsCount/portTICK_RATE_MS);
+    //vTaskDelay(MsCount/portTICK_RATE_MS);
     GPIO_PORTD_DATA_R |= SPI_CS;
+    UARTprintf("CS HIGH\n");
 
-    return value;
+    return (value);
 }
 
 static void byteWrite(uint8_t address, uint8_t data)		//write command is 0xb_
 {
-    uint8_t firstByte, command = 0xF0;
-    int MsCount = 150;
+    uint8_t firstByte, command = 0xB0;
+    int MsCount = 1; 
+    uint8_t value;
 
-    firstByte =  command | address;		//<---- any problems with this? to concatenate the address to the command?
-    vTaskDelay(MsCount/portTICK_RATE_MS);
+    firstByte =  command | address;
+
+    //vTaskDelay(MsCount/portTICK_RATE_MS);
+    delayMs(1);
+
     GPIO_PORTD_DATA_R &= ~SPI_CS;
-    UARTprintf("CS LOW\n");
+    //UARTprintf("CS LOW\n");
     
     transfer(firstByte);
     
+    //vTaskDelay(25/portTICK_RATE_MS);
+    
     transfer(data);
-    vTaskDelay(MsCount/portTICK_RATE_MS);
+    
+    
+    //vTaskDelay(MsCount/portTICK_RATE_MS);
+    delayMs(1);
     GPIO_PORTD_DATA_R |= SPI_CS;
-    UARTprintf("CS HIGH\n");
+    //UARTprintf("CS HIGH\n");
     
 }
 
@@ -261,28 +291,40 @@ _heartbeat( void *notUsed )
 static void
 _RedHeartbeat( void *notUsed )
 {
-    uint32_t redMs = 250 / portTICK_RATE_MS;
+    uint32_t redMs = 1 / portTICK_RATE_MS;
     uint32_t rledOn = 0;
 
     uint8_t slaveRed = 0x00;
+    uint8_t SlaveData;
  
     while(1)
     {
         rledOn = !rledOn;
+	//UARTprintf("rledOn= %d\n",rledOn);
         LED(LED_R,rledOn);
 
 	if(rledOn == 1)
 	{
-		slaveRed = 0x0F;	//0x0000.0100 for RED led
+		//slaveRed = 0x0F;	//0x0000.0100 for RED led
+	 	byteWrite(0x01,0x02);
+  		//SlaveData = byteRead(0x02);
+
+		//UARTprintf("SlaveOut = %x\n", SlaveData);
 	}
 	else 
 	{
-		slaveRed = 0x0F;
+		//slaveRed = 0x0F;
+		byteWrite(0x01,0x00);
+		
+		//SlaveData = byteRead(0x01);
+		//UARTprintf("SlaveOut = %x\n", SlaveData);
 	}
 	
-	byteWrite(0x06,slaveRed); 
+	//byteWrite(0x06,slaveRed); 
 
-        vTaskDelay(redMs);
+	delayMs(1);
+
+        //vTaskDelay(redMs);
     }
 
 }
@@ -317,7 +359,7 @@ int main( void )
                  "RedHeartbeat",
                  configMINIMAL_STACK_SIZE,
                  NULL,
-                 tskIDLE_PRIORITY,
+                 tskIDLE_PRIORITY+1,
                  NULL );
 
     /* Start the tasks and timer running. */
