@@ -26,26 +26,29 @@
 #include "assert.h"
 
 #define LED_R (1<<1)
-#define LED_G (1<<3)
 #define LED_B (1<<2)
+#define LED_G (1<<3)
 #define SW1   (1<<4)
 #define SW2   (1<<0)
 
 #define SLA_RESET (1<<0) //PD0
 #define SLA_CS (1<<1) //PD1
-#define SLA_SCK (1<<2) //PD2
 #define SLA_SI (1<<3) //PD3
 
-#define SLA_SO (1<<6) //PD6
+#define SLA_SCK (1<<1) //PB1
+#define SLA_SO (1<<0) //PB0
 
 
 #define LED_ON(x) (GPIO_PORTF_DATA_R |= (x))
 #define LED_OFF(x) (GPIO_PORTF_DATA_R &= ~(x))
 #define LED(led,on) ((on)?LED_ON(led):LED_OFF(led))
 
-uint8_t LED_REG = 0x0F; // 0b0000 0000
-uint8_t SW_REG = 0x03; // 0b0000 0011
-uint8_t INT_REG = 0x00; // 0b0000 0000
+uint8_t LED_REG = 0x00; // 0b0000 0000; addr = 0x01
+uint8_t SW_REG = 0x05; // 0b0000 0011; addr = 0x02
+uint8_t INT_REG = 0x07; // 0b0000 0000; addr = 0x03
+
+//QueueHandle_t xQueue = xQueueCreate(20, sizeof( uint8_t ) );
+QueueHandle_t xQueue;
 
 enum State {IDLE, COMMAND, READ_REG, WRITE_REG, DONE};
 
@@ -106,8 +109,42 @@ delayMs(uint32_t ms)
 }
 
 static void
+_interruptHandlerPortB(void)
+{
+	int m;
+    //
+    // We have not woken a task at the start of the ISR.
+    //
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+
+    uint32_t mask = GPIOIntStatus(GPIO_PORTB_BASE, 1);
+
+    if (mask)
+    {
+        if(GPIO_PORTB_DATA_R & SLA_SCK){
+        	m = 0x03;
+        	xQueueSendFromISR( xQueue, &m, &xHigherPriorityTaskWoken );
+        }
+        else{
+        	m = 0x04;
+        	xQueueSendFromISR( xQueue, &m, &xHigherPriorityTaskWoken );
+        }
+    }
+
+    if (xHigherPriorityTaskWoken)
+    {
+        // should request a schedule update....  
+        // ....stay tuned
+    }    
+
+    GPIOIntClear(GPIO_PORTB_BASE, mask);
+}
+
+static void
 _interruptHandlerPortD(void)
 {
+	int m;
     //
     // We have not woken a task at the start of the ISR.
     //
@@ -118,7 +155,14 @@ _interruptHandlerPortD(void)
 
     if (mask)
     {
-        // code
+        if(GPIO_PORTD_DATA_R & SLA_CS){
+        	m = 0x00;
+        	xQueueSendFromISR( xQueue, &m, &xHigherPriorityTaskWoken );
+        }
+        else{
+        	m = 0x01;
+        	xQueueSendFromISR( xQueue, &m, &xHigherPriorityTaskWoken );
+        }
     }
 
     if (xHigherPriorityTaskWoken)
@@ -142,6 +186,8 @@ _setupHardware(void)
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
 
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+
     // Enable the GPIO pin for the LED (PF3).  Set the direction as output, and
     // enable the GPIO pin for digital function.
     // These are TiveDriver library functions
@@ -150,9 +196,12 @@ _setupHardware(void)
     GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, SW1 );
 
 
-    GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, (SLA_RESET | SLA_CS | SLA_SCK | SLA_SI));
-    GPIOPinTypeGPIOOutput(GPIO_PORTD_BASE, (SLA_SO));
-    GPIOPadConfigSet(GPIO_PORTD_BASE, (SLA_CS| SLA_SCK) , GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
+    GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, (SLA_RESET | SLA_CS | SLA_SI));
+    GPIOPadConfigSet(GPIO_PORTD_BASE, (SLA_CS) , GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
+
+    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, (SLA_SCK));
+    GPIOPadConfigSet(GPIO_PORTB_BASE, (SLA_SCK) , GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
+    GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, (SLA_SO));
 
 
 
@@ -184,9 +233,9 @@ _setupHardware(void)
 void setMISO(uint8_t val)
 {
     if (val - 0x80 == 0x00) // if one bit
-        GPIO_PORTD_DATA_R |= SLA_SO;
+        GPIO_PORTB_DATA_R |= SLA_SO;
     else // else if 0 bit
-        GPIO_PORTD_DATA_R &= ~SLA_SO;
+        GPIO_PORTB_DATA_R &= ~SLA_SO;
 }
 
 uint8_t getMOSI(){
@@ -213,7 +262,7 @@ uint8_t transferSlave(uint8_t out)
                 setMISO(out & 0x80);
                 jobFlag = 1;
             }
-            if (jobFlag && GPIO_PORTD_DATA_R & SLA_SCK){
+            if (jobFlag && GPIO_PORTB_DATA_R & SLA_SCK){
                 state = 1;
                 jobFlag = 0;
             }
@@ -226,7 +275,7 @@ uint8_t transferSlave(uint8_t out)
                 out <<= 1;
                 jobFlag = 1;
             }
-            if (jobFlag && GPIO_PORTD_DATA_R & ~SLA_SCK){
+            if (jobFlag && GPIO_PORTB_DATA_R & ~SLA_SCK){
                 state = 0;
                 jobFlag = 0;
                 count++;
@@ -250,7 +299,7 @@ uint8_t transferSCKLow(uint8_t out, uint8_t in)
 uint8_t transferSCKHigh(uint8_t out, uint8_t in)
 {
 	in += getMOSI();
-	UARTprintf("bit in: %x\n", in & 0x01);
+	//UARTprintf("bit in: %x\n", in & 0x01);
 	return in;
 }
 
@@ -261,10 +310,16 @@ _slave( void *pvParameters )
     uint8_t dataIn1, dataIn2;
 
     GPIOIntRegister(GPIO_PORTD_BASE, _interruptHandlerPortD);
-    GPIOIntTypeSet(GPIO_PORTD_BASE, SLA_CS, GPIO_FALLING_EDGE);
+    GPIOIntTypeSet(GPIO_PORTD_BASE, SLA_CS, GPIO_BOTH_EDGES);
 
     IntPrioritySet(INT_GPIOD, 255);  // Required with FreeRTOS 10.1.1, 
     GPIOIntEnable(GPIO_PORTD_BASE, SLA_CS);
+
+    GPIOIntRegister(GPIO_PORTB_BASE, _interruptHandlerPortB);
+    GPIOIntTypeSet(GPIO_PORTB_BASE, SLA_SCK, GPIO_BOTH_EDGES);
+
+    IntPrioritySet(INT_GPIOB, 255);  // Required with FreeRTOS 10.1.1, 
+    GPIOIntEnable(GPIO_PORTB_BASE, SLA_SCK);
 
     struct AMessage *pxRxedMessage;
     uint8_t val;
@@ -284,31 +339,31 @@ _slave( void *pvParameters )
         if(( xQueueReceive( ((QueueHandle_t)pvParameters), &( pxRxedMessage ), ( TickType_t ) 10 ) ) == pdTRUE)
         {
         	val = (int) pxRxedMessage & 0xFF;
-        	//UARTprintf("Int Code: %X\n", val);
+        	//UARTprintf("Val: %X\n", val);
 
-
-		    if(val == 0x00){
-		    	UARTprintf("CS HIGH\n");
-		    	// slaveState = IDLE;
-		    	// in = 0;
-
-		    }
-		    else if(val == 0x01){
-		    	UARTprintf("CS LOW\n");
-		    	if(slaveState == IDLE){
-		    		UARTprintf("Command entered\n");
-        			slaveState = COMMAND;
-        			in = 0;
-        			blank = transferSCKLow(blank, in);
+		    // State Machine
+		    // IDLE
+		    // =====================
+	        if (slaveState == IDLE){
+	        	// CS Low
+	        	if(val == 0x01){
+		    		//UARTprintf("CS LOW\n");
+		    		if(slaveState == IDLE){
+		    			//UARTprintf("Command entered\n");
+        				slaveState = COMMAND;
+        				outCounter = 0;
+        				in = 0;
+        				blank = transferSCKLow(blank, in);
+    				}
         		}
-		    }
+	        }
 
-		    // SCK goes high
-		    else if(val == 0x03){
-		    	UARTprintf("SCK HIGH\n");
-
-		    	// getting Command and Address
-		    	if(slaveState == COMMAND){
+	        // State Machine
+		    // COMMAND
+		    // ============================
+		    else if(slaveState == COMMAND){
+		    	// SCK High
+        		if(val == 0x03){
         			in = transferSCKHigh(blank, in);
         			outCounter++;
     			
@@ -316,21 +371,34 @@ _slave( void *pvParameters )
 	    			  if (outCounter >= 8){
 	    			  	command = (in & 0xF0) >> 4;
 	    			  	addr = in & 0x0F;
-	    			  	UARTprintf("address: %X\n", addr);
+	    			  	//UARTprintf("address: %X\n", addr);
 	    			  	if(command == 0x0b){
-	    			  		slaveState = WRITE_REG;
-	    			  		UARTprintf("Write entered\n");
+	    			  		if(addr == 0x01 || addr == 0x02 || addr == 0x03)
+	    			  			slaveState = WRITE_REG;
+	    			  		else
+	    			  			slaveState = DONE; // Invalid Address
+	    			  		//UARTprintf("Write entered\n");
 	    			  	}
 	    			  	else if (command == 0x0a){
 	    			  		slaveState = READ_REG;
+	    			  		//UARTprintf("Read entered\n");
 	    			  		if (addr == 0x01)
 	    			  			dataOut = LED_REG;
-	    			  		UARTprintf("Read entered\n");
+	    			  		else if (addr == 0x02)
+	    			  			dataOut = SW_REG;
+	    			  		else if (addr == 0x03)
+	    			  			dataOut = INT_REG;
+	    			  		else{
+	    			  			slaveState = DONE;
+	    			  			//UARTprintf("Error: invalid Address\n");
+	    			  			//UARTprintf("Enterted Done State\n");
+	    			  		}
+	    			  		
 	    			  	}
 	    			  	else{
-	    			  		slaveState = IDLE;
-	    			  		UARTprintf("error: reset to IDLE\n");
-	    			  		UARTprintf("in full: %X\n", in & 0xFF);
+	    			  		slaveState = DONE;
+	    			  		//UARTprintf("error: Invalid Command\n");
+	    			  		//UARTprintf("Enterted Done State\n");
 	    			  	}
 	    			  	outCounter = 0;
 	    			  	in = 0;
@@ -338,105 +406,83 @@ _slave( void *pvParameters )
 	    			  else
 	    			  	in <<= 1;
 	    		}
+	    		// SCK Low
+	    		else if(val == 0x04){
+	    			blank = transferSCKLow(blank, in);
+	    		}
+	        }
 
-	    		//If writing to Register
-	    		else if(slaveState == WRITE_REG){
+	        // State Machine
+		    // WRITE_REG
+		    // ==============================
+	        else if(slaveState == WRITE_REG){
+	        	// SCK goes high
+		    	if(val == 0x03){
 	    			in = transferSCKHigh(blank, in);
 	    			outCounter++;
 
 	    			// begin write to register
 	    			if (outCounter >= 8){
-	    				if(addr == 0x01){
+	    				if(addr == 0x01)
 	    					LED_REG = in;
-	    				}
+	    				else if (addr == 0x02)
+	    					SW_REG = in;
+	    				else if (addr == 0x03)
+	    					INT_REG == in;
 	    				outCounter = 0;
 	    				in = 0;
-	    				slaveState = IDLE;
+	    				slaveState = DONE;
 	    			}
 	    			// Left shift for next bit
 	    			else
 	    				in <<= 1;
 	    		}
+	    		// SCK Low
+	    		else if(val == 0x04){
+	    			blank = transferSCKLow(blank, in);
+	    		}
+	        }
 
-	    		else if(slaveState == READ_REG){
-	    			in = transferSCKHigh(dataOut, in);
+	        // State Machine
+		    // READ_REG
+		    // =============================
+	        else if(slaveState == READ_REG){
+	        	// SCK goes high
+		    	if(val == 0x03){
+	    			//in = transferSCKHigh(dataOut, in);
 	    			outCounter++;
 
-	    			if(outCounter >= 8){
-        				outCounter = 0;
-        				in = 0;
-        				dataOut = 0;
-        				slaveState = IDLE;
-        			}
+	    			// begin write to register
+	    			if (outCounter >= 8){
+	    				outCounter = 0;
+	    				in = 0;
+	    				slaveState = DONE;
+	    			}
+	    			// Left shift for next bit
+	    			else
+	    				in <<= 1;
 	    		}
-		    }
-
-		    // SCK goes Low
-		    else if(val == 0x04){
-		    	UARTprintf("SCK LOW\n");
-		    	if(slaveState == COMMAND || slaveState == WRITE_REG){
-        			blank = transferSCKLow(blank, in);
-		    	}
-
-        		else if(slaveState == READ_REG){
-        			dataOut = transferSCKLow(dataOut, in);
-        		}
-		    }
+	    		// SCK Low
+	    		else if(val == 0x04){
+	    			dataOut = transferSCKLow(dataOut, in);
+	    		}
+	    		else if(val == 0x00){
+	    			UARTprintf("Error: CS went High\n");
+	    			slaveState = DONE;
+	    		}
+	        }
 
 
-		    // // State Machine
-	     //    if (slaveState == IDLE){
-	     //    	if(val == 0x01){
-		    // 		UARTprintf("CS LOW\n");
-		    // 		if(slaveState == IDLE){
-		    // 			UARTprintf("Command entered\n");
-      //   				slaveState = COMMAND;
-      //   				in = 0;
-      //   				blank = transferSCKLow(blank, in);
-      //   		}
-      //   		else if(val == 0x03){
-      //   			in = transferSCKHigh(blank, in);
-      //   			outCounter++;
-    			
-					 //  // End of 8 bit read/write
-	    	// 		  if (outCounter >= 8){
-	    	// 		  	command = (in & 0xF0) >> 4;
-	    	// 		  	addr = in & 0x0F;
-	    	// 		  	UARTprintf("address: %X\n", addr);
-	    	// 		  	if(command == 0x0b){
-	    	// 		  		slaveState = WRITE_REG;
-	    	// 		  		UARTprintf("Write entered\n");
-	    	// 		  	}
-	    	// 		  	else if (command == 0x0a){
-	    	// 		  		slaveState = READ_REG;
-	    	// 		  		if (addr == 0x01)
-	    	// 		  			dataOut = LED_REG;
-	    	// 		  		UARTprintf("Read entered\n");
-	    	// 		  	}
-	    	// 		  	else{
-	    	// 		  		slaveState = IDLE;
-	    	// 		  		UARTprintf("error: reset to IDLE\n");
-	    	// 		  		UARTprintf("in full: %X\n", in & 0xFF);
-	    	// 		  	}
-	    	// 		  	outCounter = 0;
-	    	// 		  	in = 0;
-	    	// 		  }
-	    	// 		  else
-	    	// 		  	in <<= 1;
-	    	// 	}
-	     //    }
-	     //    else if(slaveState == COMMAND){
-
-	     //    }
-	     //    else if(slaveState == READ_REG){
-	        	
-	     //    }
-	     //    else if(slaveState == WRITE_REG){
-	        	
-	     //    }
-	     //    else if(slaveState == DONE){
-	        	
-	     //    }
+	        // State Machine
+		    // DONE
+		    // ============================
+	        else if(slaveState == DONE){
+	        	// CS HIGH
+	        	if(val == 0x00){
+	        		slaveState = IDLE;
+	        		//UARTprintf("Entered Idle State\n");
+	    	    }
+    	    }
 	    }
 
         //enum State {IDLE, COMMAND, READ_REG, WRITE_REG, DONE};
@@ -449,7 +495,7 @@ _intPoll( void *pvParameters )
 {
 
 	int currCS = ~GPIO_PORTD_DATA_R & SLA_CS;
-	int currSCK = GPIO_PORTD_DATA_R & SLA_SCK;
+	int currSCK = GPIO_PORTB_DATA_R & SLA_SCK;
 	int newCS;
 	int newSCK;
 
@@ -461,7 +507,7 @@ _intPoll( void *pvParameters )
     	while(1)
     	{
     		newCS = GPIO_PORTD_DATA_R & SLA_CS;
-    		newSCK = GPIO_PORTD_DATA_R & SLA_SCK;
+    		newSCK = GPIO_PORTB_DATA_R & SLA_SCK;
 
     		// if CS is low
     		if(currCS == 0){
@@ -502,7 +548,7 @@ _intPoll( void *pvParameters )
     		}
 
     		//UARTprintf("Test: %X\n", GPIO_PORTD_DATA_R & SLA_CS);
-    		vTaskDelay(1 / portTICK_RATE_MS);
+    		vTaskDelay((1 / portTICK_RATE_MS));
 
         }
     }
@@ -527,7 +573,7 @@ _setLEDs( void *notUsed ){
 		else
 			GPIO_PORTF_DATA_R &= ~LED_G;
 
-		vTaskDelay(10);
+		//vTaskDelay(10);
 	}
 }
 
@@ -542,13 +588,13 @@ _heartbeat( void *notUsed )
         ledOn = !ledOn;
         LED(LED_G, ledOn);
         
-        vTaskDelay(green500ms / portTICK_RATE_MS);
+        //vTaskDelay(green500ms / portTICK_RATE_MS);
     }
 }
 
 int main( void )
 {
-	QueueHandle_t xQueue;
+	//QueueHandle_t xQueue;
 
     _setupHardware();
 
@@ -575,18 +621,18 @@ int main( void )
 
     xQueue = xQueueCreate(20, sizeof( uint8_t ) );
 
-    xTaskCreate(_intPoll,
-                "intPoll",
-                configMINIMAL_STACK_SIZE,
-                (void *) xQueue,
-                tskIDLE_PRIORITY + 3,
-                NULL );
+    // xTaskCreate(_intPoll,
+    //             "intPoll",
+    //             configMINIMAL_STACK_SIZE,
+    //             (void *) xQueue,
+    //             tskIDLE_PRIORITY + 2,
+    //             NULL );
 
     xTaskCreate(_slave,
                 "slave",
                 configMINIMAL_STACK_SIZE,
                 (void *) xQueue,
-                tskIDLE_PRIORITY + 4,  // higher numbers are higher priority..
+                tskIDLE_PRIORITY + 3,  // higher numbers are higher priority..
                 NULL );
 
 
