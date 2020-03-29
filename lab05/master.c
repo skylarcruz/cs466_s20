@@ -52,6 +52,9 @@
 // interrupt
 #define SPI_INT (1<<0) //PB0
 
+// SW interrupt Tiva Slave
+#define SW_INT (1<<4) //PC4
+
 #define LED_ON(x) (GPIO_PORTF_DATA_R |= (x))
 #define LED_OFF(x) (GPIO_PORTF_DATA_R &= ~(x))
 #define LED(led,on) ((on)?LED_ON(led):LED_OFF(led))
@@ -121,9 +124,10 @@ uint8_t getMISO(){
 uint8_t transfer(uint8_t out)
 {
     uint8_t count, in = 0;
-    int MsCount = 1/portTICK_RATE_MS;
+    //int MsCount = 1/portTICK_RATE_MS;
+    int MsCount = 25;
 
-    int intdelay = MsCount/portTICK_RATE_MS/2;
+    //int intdelay = MsCount/portTICK_RATE_MS/2;
 
     for (count = 0; count < 8; count++)
     {
@@ -131,15 +135,15 @@ uint8_t transfer(uint8_t out)
         setMOSI(out & 0x80);
 	//UARTprintf("MOSI = %d\n",(out & 0x80));
 
-	vTaskDelay(MsCount);
-        delayUs(1400);
+	//vTaskDelay(MsCount);
+    delayMs(MsCount);
 	
 	GPIO_PORTD_DATA_R |= SPI_SCK;
 	
         in += getMISO();
 	//UARTprintf("MISO = %d\n",(in & 0x01));
-	vTaskDelay(MsCount);
-        delayUs(1400);
+	//vTaskDelay(MsCount);
+    delayMs(MsCount);
 	
 	GPIO_PORTD_DATA_R &= ~SPI_SCK;
         out <<= 1;
@@ -152,24 +156,26 @@ uint8_t transfer(uint8_t out)
 static uint8_t byteRead(uint8_t address)
 {
     uint8_t firstByte, value, command = 0xA0;
-    int MsCount = 5;
+    int MsCount = 25;
 
     firstByte = command | address;		
     
     GPIO_PORTD_DATA_R &= ~SPI_CS;    //add 10ms delays in read function too?
-    UARTprintf("CS LOW\n");
+    //UARTprintf("CS LOW\n");
 
-    vTaskDelay(MsCount/portTICK_RATE_MS);
+    //vTaskDelay(MsCount/portTICK_RATE_MS);
+    delayMs(MsCount);
 
     transfer(firstByte);
 
-    vTaskDelay(10/portTICK_RATE_MS);
+    //vTaskDelay(10/portTICK_RATE_MS);
+    delayMs(MsCount);
 
     value = transfer(0);
 
     //vTaskDelay(MsCount/portTICK_RATE_MS);
     GPIO_PORTD_DATA_R |= SPI_CS;
-    UARTprintf("CS HIGH\n");
+    //UARTprintf("CS HIGH\n");
 
     return (value);
 }
@@ -177,31 +183,82 @@ static uint8_t byteRead(uint8_t address)
 static void byteWrite(uint8_t address, uint8_t data)		//write command is 0xb_
 {
     uint8_t firstByte, command = 0xB0;
-    int MsCount = 1; 
+    int MsCount = 25; 
     uint8_t value;
 
     firstByte =  command | address;
 
     //vTaskDelay(MsCount/portTICK_RATE_MS);
-    delayMs(1);
+    delayMs(MsCount);
 
     GPIO_PORTD_DATA_R &= ~SPI_CS;
     //UARTprintf("CS LOW\n");
     
     transfer(firstByte);
     
-    //vTaskDelay(25/portTICK_RATE_MS);
-    
+    //vTaskDelay(MsCount/portTICK_RATE_MS);
+    delayMs(MsCount);
+
     transfer(data);
     
     
     //vTaskDelay(MsCount/portTICK_RATE_MS);
-    delayMs(1);
+    delayMs(MsCount);
+
     GPIO_PORTD_DATA_R |= SPI_CS;
     //UARTprintf("CS HIGH\n");
     
 }
 
+static void
+_interruptHandlerPortC(void)
+{
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    uint8_t currSW_REG;
+    uint8_t currINT_REG;
+
+    uint32_t mask = GPIOIntStatus(GPIO_PORTC_BASE, 1);
+
+    UARTprintf("Interrupt from slave received\n");
+
+    GPIO_PORTD_DATA_R |= SPI_CS;
+    byteRead(0xFF); // FLUSH COMMAND
+    delayMs(5);
+
+    if (mask)
+    {
+        currSW_REG = byteRead(0x02);
+        UARTprintf("currSW_REG: %X\n", currSW_REG);
+        //delayMs(5);
+
+        if(currSW_REG & (1<<2)) // SW1 caused interrupt
+        {
+            currINT_REG = byteRead(0x03); // Get current enabled INTs
+            delayMs(10);
+            UARTprintf("SW1: Writing to INT_REG: %X\n", currINT_REG | (1<<0));
+            byteWrite(0x03, (currINT_REG | (1<<0))); // Acknowledge SW1
+            delayMs(5);
+        }
+
+        if(currSW_REG & (1<<3)) // SW2 caused interrupt
+        {
+            currINT_REG = byteRead(0x03); // Get current enabled INTs
+            delayMs(10);
+            UARTprintf("SW2: Writing to INT_REG: %X\n", currINT_REG | (1<<1));
+            byteWrite(0x03, (currINT_REG | (1<<1))); // Acknowledge SW2
+            delayMs(5);
+        }
+
+    }
+
+    if (xHigherPriorityTaskWoken)
+    {
+        // should request a schedule update....  
+        // ....stay tuned
+    }    
+
+    GPIOIntClear(GPIO_PORTC_BASE, mask);
+}
 
 
 
@@ -251,6 +308,8 @@ _setupHardware(void)
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
 
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+
     // Enable the GPIO pin for the LED (PF3).  Set the direction as output, and
     // enable the GPIO pin for digital function.
     // These are TiveDriver library functions
@@ -263,6 +322,9 @@ _setupHardware(void)
 
     GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, (SPI_INT));
     GPIOPadConfigSet(GPIO_PORTB_BASE, SPI_INT, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
+
+    GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, SW_INT);
+    GPIOPadConfigSet(GPIO_PORTC_BASE, SW_INT, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
 
     SystemCoreClock = 80000000;  // Required for FreeRTOS.
 
@@ -278,7 +340,12 @@ _heartbeat( void *notUsed )
 {
     uint32_t greenMs = 500 / portTICK_RATE_MS;
     uint32_t ledOn = 0;
-   
+    
+    GPIOIntRegister(GPIO_PORTC_BASE, _interruptHandlerPortC);
+    GPIOIntTypeSet(GPIO_PORTC_BASE, SW_INT, GPIO_RISING_EDGE);
+
+    IntPrioritySet(INT_GPIOC, 255);  // Required with FreeRTOS 10.1.1, 
+    GPIOIntEnable(GPIO_PORTC_BASE, SW_INT);
 
     while(1)
     {
@@ -300,6 +367,11 @@ _RedHeartbeat( void *notUsed )
 
     uint8_t slaveRed = 0x00;
     uint8_t SlaveData;
+    
+    byteWrite(0xFF,0xFF); // Flush prev slave action
+    vTaskDelay(redMs);
+    byteWrite(0x03,(1<<2 | 1<<3));   //enable SW1 Interrupt
+    vTaskDelay(redMs);
  
     while(1)
     {
@@ -307,29 +379,38 @@ _RedHeartbeat( void *notUsed )
 	//UARTprintf("rledOn= %d\n",rledOn);
         LED(LED_R,rledOn);
 
+    
+
 	if(rledOn == 1)
 	{
 		//slaveRed = 0x0F;	//0x0000.0100 for RED led
-	 	byteWrite(0x01, SLA_LED_B);
-  		SlaveData = byteRead(0x02);
+	 	byteWrite(0x01, (SLA_LED_B | SLA_LED_R));
+        vTaskDelay(redMs);
+  		SlaveData = byteRead(0x03);
 
-		UARTprintf("SlaveOut = %x\n", SlaveData);
+		//UARTprintf("INT_REG = %x\n", SlaveData);
 	}
 	else 
 	{
 		//slaveRed = 0x0F;
 		byteWrite(0x01,0x00);
-		
-		SlaveData = byteRead(0x01);
-		UARTprintf("SlaveOut = %x\n", SlaveData);
+		vTaskDelay(redMs);
+		SlaveData = byteRead(0x03);
+		//UARTprintf("INT_REG = %x\n", SlaveData);
 	}
 	
 	//byteWrite(0x06,slaveRed); 
 
-	delayMs(1);
+	//delayMs(1);
 
-        //vTaskDelay(redMs);
+    vTaskDelay(redMs);
     }
+
+}
+
+static void
+_IntPoll( void *notUsed )
+{
 
 }
 
