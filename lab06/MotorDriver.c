@@ -14,6 +14,8 @@
 #include "driverlib/gpio.h"
 #include "driverlib/interrupt.h"
 #include "driverlib/watchdog.h"
+#include "driverlib/timer.h"
+#include "driverlib/rom.h"
 #include "inc/hw_memmap.h"
 
 /* Optional includes for USB serial output */
@@ -46,9 +48,11 @@
 
 uint8_t LED_REG = 0x00; // 0b0000 0000; addr = 0x01
 uint8_t SW_REG = 0x00; // 0b0000 0011; addr = 0x02
-uint8_t INT_REG = 0x00; // 0b0000 0000; addr = 0x03
-
+uint8_t INT_REG = 0x00; // 0b0000 0000
 uint32_t SystemCoreClock;
+
+uint32_t MOTOR_POS = 0;
+uint8_t MOTOR_STATE = 0x00; // A = bit 0, B = bit 1
 
 #ifdef USB_SERIAL_OUTPUT
 
@@ -82,6 +86,7 @@ _configureUART(void)
 
 #endif
 
+
 void
 delayUs(uint32_t us)
 {
@@ -106,14 +111,20 @@ delayMs(uint32_t ms)
 static void
 _interruptHandlerPortD(void)
 {
-	uint32_t A_State = 0;
-	uint32_t B_State = 0;
+	// uint32_t A_State = 0;
+	// uint32_t B_State = 0;
+    uint32_t A_State = GPIO_PORTD_DATA_R & Quad_A;
+	uint32_t B_State = GPIO_PORTD_DATA_R & Quad_B;
+
     //
     // We have not woken a task at the start of the ISR.
     //
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 	
-  
+    // A High, B High:
+    // A High, B Low:
+    // A Low, B High:
+    // A Low, B Low:
 	
 
     uint32_t mask = GPIOIntStatus(GPIO_PORTD_BASE, 1);
@@ -123,11 +134,31 @@ _interruptHandlerPortD(void)
 		if(A_State)
 		{
 			UARTprintf("Quad_A High\n");
-			A_State = !A_State;
+            if(MOTOR_STATE & (Quad_B)){ // B is High
+                UARTprintf("Forward...\n");
+                MOTOR_POS += 1;
+                MOTOR_STATE |= Quad_A;
+            }
+            else{                       // B is Low
+                UARTprintf("Backward...\n");
+                MOTOR_POS -= 1;
+                MOTOR_STATE |= Quad_A;
+            }
+            //MOTOR_POS += 100;
+			//A_State = !A_State;
 		}else if(!A_State)
 		{
 			UARTprintf("Quad_A Low\n");
-			A_State = !A_State;
+            if(MOTOR_STATE & ~(Quad_B)){ // B is Low
+                UARTprintf("Forward...\n");
+                MOTOR_POS += 1;
+                MOTOR_STATE &= ~Quad_A;
+            }
+            else{                        // B is High
+                UARTprintf("Backward...\n");
+                MOTOR_POS -= 1;
+                MOTOR_STATE &= ~Quad_A;
+            }
 		}
 
     }
@@ -137,11 +168,33 @@ _interruptHandlerPortD(void)
 		if(B_State)		
 		{
 			UARTprintf("Quad_B High\n");
-			B_State = !B_State;
+            if(MOTOR_STATE & ~(Quad_A)){ // A is low
+                UARTprintf("Forward...\n");
+                MOTOR_POS += 1;
+                MOTOR_STATE |= Quad_B;
+            }
+            else{                        // A is high
+                UARTprintf("Backward...\n");
+                MOTOR_POS -= 1;
+                MOTOR_STATE |= Quad_B;
+            }
+            //MOTOR_POS += 50;
+			//B_State = !B_State;
 		}else if(!B_State)
 		{
 			UARTprintf("Quad_B Low\n");
-			B_State = !B_State;
+            if(MOTOR_STATE & ~(Quad_A)){ // A is low
+                UARTprintf("Backward...\n");
+                MOTOR_POS += 1;
+                MOTOR_STATE &= ~Quad_B;
+            }
+            else{                        // A is high
+                UARTprintf("Forward...\n");
+                MOTOR_POS -= 1;
+                MOTOR_STATE &= ~Quad_B;
+            }
+            //MOTOR_POS -= 50;
+			//B_State = !B_State;
 		}
 	
 	}
@@ -153,6 +206,7 @@ _interruptHandlerPortD(void)
         // ....stay tuned
     }    
 
+    //UARTprintf("Motor Position: %d\n", MOTOR_POS);
     GPIOIntClear(GPIO_PORTD_BASE, mask);
 }
 
@@ -191,6 +245,13 @@ _setupHardware(void)
     GPIOIntEnable(GPIO_PORTD_BASE, (Quad_A | Quad_B) );
     //GPIOIntEnable(GPIO_PORTD_BASE, Quad_B);
 
+    // Timer Setup
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
+    ROM_TimerConfigure(TIMER0_BASE, TIMER_CFG_PERIODIC);
+    ROM_TimerLoadSet(TIMER0_BASE, TIMER_A, ROM_SysCtlClockGet());
+    ROM_TimerEnable(TIMER0_BASE, TIMER_A);
+
+
     SystemCoreClock = 80000000;  // Required for FreeRTOS.
 
     SysCtlClockSet( SYSCTL_SYSDIV_2_5 |
@@ -206,16 +267,44 @@ _setupHardware(void)
 static void
 _heartbeat( void *notUsed )
 {
-    uint32_t green500ms = 500; // 1 second
+    uint32_t green500ms = 100; // 1 second
     uint32_t ledOn = 0;
+
+    uint32_t prevTicks = 0;
+    uint32_t newTicks = 0;
+    uint32_t totalTicks;
+
+    uint32_t startTime;
+    uint32_t endTime;
+    uint32_t totalTime;
 	
     while(true)
     {
         ledOn = !ledOn;
         LED(LED_G, ledOn);
-		
+
+        prevTicks = MOTOR_POS;
+        startTime = TimerValueGet(TIMER0_BASE, TIMER_A);
+
         UARTprintf("Heartbeat led: %u\n",ledOn);
         vTaskDelay(green500ms / portTICK_RATE_MS);
+
+        newTicks = MOTOR_POS;
+        totalTicks = newTicks - prevTicks;
+
+        endTime = TimerValueGet(TIMER0_BASE, TIMER_A);
+
+        if(startTime > endTime)
+            totalTime = startTime - endTime;
+        else
+            totalTime = startTime + (ROM_SysCtlClockGet() - endTime);
+
+        UARTprintf("Rotations = %d", totalTicks/300);
+        UARTprintf("Time in system ticks: %d\n", totalTime);
+        // print(Speed = rotations/time)
+
+
+
 		
     }
 }
