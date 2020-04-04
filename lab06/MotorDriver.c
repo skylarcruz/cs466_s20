@@ -52,7 +52,8 @@ uint8_t INT_REG = 0x00; // 0b0000 0000
 uint32_t SystemCoreClock;
 
 uint32_t MOTOR_POS = 0;
-uint8_t MOTOR_STATE = 0x00; // A = bit 0, B = bit 1
+//uint8_t MOTOR_STATE = 0x00; // A = bit 0, B = bit 1
+uint8_t PREV_MOTOR_STATE = 0x00; 
 
 #ifdef USB_SERIAL_OUTPUT
 
@@ -111,8 +112,6 @@ delayMs(uint32_t ms)
 static void
 _interruptHandlerPortD(void)
 {
-	// uint32_t A_State = 0;
-	// uint32_t B_State = 0;
     uint32_t A_State = GPIO_PORTD_DATA_R & Quad_A;
 	uint32_t B_State = GPIO_PORTD_DATA_R & Quad_B;
 
@@ -129,6 +128,86 @@ _interruptHandlerPortD(void)
 
     uint32_t mask = GPIOIntStatus(GPIO_PORTD_BASE, 1);
 
+    UARTprintf("PREV_MOTOR_STATE = %u\n",PREV_MOTOR_STATE);
+
+    if ( mask & (Quad_A | Quad_B) )
+    {
+		if(A_State && B_State)  //State 11
+		{
+			UARTprintf("HIGH HIGH\n");
+            if(PREV_MOTOR_STATE == 0x1)  //Prev = 01
+            { 
+                //UARTprintf("Forward...\n");
+                MOTOR_POS += 1;
+            }
+            else if(PREV_MOTOR_STATE == 0x2) //Prev = 10
+            { 
+                //UARTprintf("Backward...\n");
+                MOTOR_POS -= 1;
+            }else {
+                UARTprintf("Missed Motor State\n");
+            }
+
+            PREV_MOTOR_STATE = 0x3;     //11
+
+		}
+        else if(A_State && !B_State)    //State 10
+		{
+			UARTprintf("HIGH LOW\n");
+            if(PREV_MOTOR_STATE == 0x3)   //Prev = 11
+            { 
+                //UARTprintf("Forward...\n");
+                MOTOR_POS += 1;
+            }
+            else if(PREV_MOTOR_STATE == 0x00)   //Prev = 00
+            {                  
+                //UARTprintf("Backward...\n");
+                MOTOR_POS -= 1;
+            }else{ 
+                UARTprintf("Missed Motor State\n");
+            }
+
+            PREV_MOTOR_STATE = 0x2;
+
+		}else if(!A_State && !B_State)  //State 00
+        {
+            UARTprintf("LOW LOW\n");
+            if(PREV_MOTOR_STATE == 0x1)  //Prev = 01
+            {
+                //UARTprintf("Forward...\n")
+                MOTOR_POS += 1;
+            }
+            else if(PREV_MOTOR_STATE == 0x2) //Prev = 10
+            {
+                //UARTprintf("Backward...\n");
+                MOTOR_POS -= 1;
+            }else{ 
+                UARTprintf("Missed Motor State\n"); 
+            }
+
+            PREV_MOTOR_STATE = 0x00;
+
+        }else if(!A_State && B_State)    //State = 01
+        {
+            UARTprintf("LOW HIGH\n");
+            if(PREV_MOTOR_STATE == 0x00)  //Prev = 00
+            {
+                //UARTprintf("Forward...\n");
+                MOTOR_POS += 1;
+            }
+            else if(PREV_MOTOR_STATE == 0x3) //Prev = 11
+            {
+                //UARTprintf("Backward...\n");
+                MOTOR_POS -= 1;
+            }else{ 
+                UARTprintf("Missed Motor State\n"); 
+            }
+
+            PREV_MOTOR_STATE = 0x1;
+        }
+    }
+
+    /*
     if ( mask & Quad_A)
     {
 		if(A_State)
@@ -196,9 +275,12 @@ _interruptHandlerPortD(void)
             //MOTOR_POS -= 50;
 			//B_State = !B_State;
 		}
+        
 	
 	}
+    */
 
+    UARTprintf("MOTOR POS = %u\n",MOTOR_POS);
 
     if (xHigherPriorityTaskWoken)
     {
@@ -259,6 +341,8 @@ _setupHardware(void)
                     SYSCTL_XTAL_16MHZ |
                     SYSCTL_OSC_MAIN);
 
+    //PREV_MOTOR_POS
+
 }
 
 
@@ -286,7 +370,7 @@ _heartbeat( void *notUsed )
         prevTicks = MOTOR_POS;
         startTime = TimerValueGet(TIMER0_BASE, TIMER_A);
 
-        UARTprintf("Heartbeat led: %u\n",ledOn);
+        //UARTprintf("Heartbeat led: %u\n",ledOn);
         vTaskDelay(green500ms / portTICK_RATE_MS);
 
         newTicks = MOTOR_POS;
@@ -299,8 +383,8 @@ _heartbeat( void *notUsed )
         else
             totalTime = startTime + (ROM_SysCtlClockGet() - endTime);
 
-        UARTprintf("Rotations = %d", totalTicks/300);
-        UARTprintf("Time in system ticks: %d\n", totalTime);
+        //UARTprintf("Rotations = %d", totalTicks/300);
+        //mUARTprintf("Time in system ticks: %d\n", totalTime);
         // print(Speed = rotations/time)
 
 
