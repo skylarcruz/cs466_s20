@@ -42,6 +42,11 @@
 #define SLA_LED_R (1<<1)
 #define SLA_LED_G (1<<2)
 
+#define PHASE_1 (0x0)
+#define PHASE_2 (0x1)
+#define PHASE_3 (0x3)
+#define PHASE_4 (0x2)
+
 #define LED_ON(x) (GPIO_PORTF_DATA_R |= (x))
 #define LED_OFF(x) (GPIO_PORTF_DATA_R &= ~(x))
 #define LED(led,on) ((on)?LED_ON(led):LED_OFF(led))
@@ -53,7 +58,7 @@ uint32_t SystemCoreClock;
 
 uint32_t MOTOR_POS = 0;
 //uint8_t MOTOR_STATE = 0x00; // A = bit 0, B = bit 1
-uint8_t PREV_MOTOR_STATE = 0x00; 
+uint32_t PREV_MOTOR_STATE = PHASE_1; 
 
 #ifdef USB_SERIAL_OUTPUT
 
@@ -112,175 +117,62 @@ delayMs(uint32_t ms)
 static void
 _interruptHandlerPortD(void)
 {
-    uint32_t A_State = GPIO_PORTD_DATA_R & Quad_A;
-	uint32_t B_State = GPIO_PORTD_DATA_R & Quad_B;
+    // uint32_t A_State = GPIO_PORTD_DATA_R & Quad_A;
+	// uint32_t B_State = GPIO_PORTD_DATA_R & Quad_B;
+    // uint32_t Phase = A_State | B_State;
 
-    //
-    // We have not woken a task at the start of the ISR.
-    //
+    uint32_t Phase = (GPIO_PORTD_DATA_R & Quad_A) | (GPIO_PORTD_DATA_R & Quad_B);
+
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-	
-    // A High, B High:
-    // A High, B Low:
-    // A Low, B High:
-    // A Low, B Low:
-	
 
     uint32_t mask = GPIOIntStatus(GPIO_PORTD_BASE, 1);
 
-    UARTprintf("PREV_MOTOR_STATE = %u\n",PREV_MOTOR_STATE);
-
     if ( mask & (Quad_A | Quad_B) )
     {
-		if(A_State && B_State)  //State 11
-		{
-			UARTprintf("HIGH HIGH\n");
-            if(PREV_MOTOR_STATE == 0x1)  //Prev = 01
-            { 
-                //UARTprintf("Forward...\n");
+        if(Phase == PHASE_1){
+            if(PREV_MOTOR_STATE == PHASE_4){
                 MOTOR_POS += 1;
             }
-            else if(PREV_MOTOR_STATE == 0x2) //Prev = 10
-            { 
-                //UARTprintf("Backward...\n");
+            else if(PREV_MOTOR_STATE == PHASE_2){
                 MOTOR_POS -= 1;
-            }else {
-                UARTprintf("Missed Motor State\n");
             }
-
-            PREV_MOTOR_STATE = 0x3;     //11
-
-		}
-        else if(A_State && !B_State)    //State 10
-		{
-			UARTprintf("HIGH LOW\n");
-            if(PREV_MOTOR_STATE == 0x3)   //Prev = 11
-            { 
-                //UARTprintf("Forward...\n");
-                MOTOR_POS += 1;
-            }
-            else if(PREV_MOTOR_STATE == 0x00)   //Prev = 00
-            {                  
-                //UARTprintf("Backward...\n");
-                MOTOR_POS -= 1;
-            }else{ 
-                UARTprintf("Missed Motor State\n");
-            }
-
-            PREV_MOTOR_STATE = 0x2;
-
-		}else if(!A_State && !B_State)  //State 00
-        {
-            UARTprintf("LOW LOW\n");
-            if(PREV_MOTOR_STATE == 0x1)  //Prev = 01
-            {
-                //UARTprintf("Forward...\n")
-                MOTOR_POS += 1;
-            }
-            else if(PREV_MOTOR_STATE == 0x2) //Prev = 10
-            {
-                //UARTprintf("Backward...\n");
-                MOTOR_POS -= 1;
-            }else{ 
-                UARTprintf("Missed Motor State\n"); 
-            }
-
-            PREV_MOTOR_STATE = 0x00;
-
-        }else if(!A_State && B_State)    //State = 01
-        {
-            UARTprintf("LOW HIGH\n");
-            if(PREV_MOTOR_STATE == 0x00)  //Prev = 00
-            {
-                //UARTprintf("Forward...\n");
-                MOTOR_POS += 1;
-            }
-            else if(PREV_MOTOR_STATE == 0x3) //Prev = 11
-            {
-                //UARTprintf("Backward...\n");
-                MOTOR_POS -= 1;
-            }else{ 
-                UARTprintf("Missed Motor State\n"); 
-            }
-
-            PREV_MOTOR_STATE = 0x1;
+            else
+                UARTprintf("Phase skipped\n");
         }
+        else if(Phase == PHASE_2){
+            if(PREV_MOTOR_STATE == PHASE_1){
+                MOTOR_POS += 1;
+            }
+            else if(PREV_MOTOR_STATE == PHASE_3){
+                MOTOR_POS -= 1;
+            }
+            else
+                UARTprintf("Phase skipped\n");
+        }
+        else if(Phase == PHASE_3){
+            if(PREV_MOTOR_STATE == PHASE_2){
+                MOTOR_POS += 1;
+            }
+            else if(PREV_MOTOR_STATE == PHASE_4){
+                MOTOR_POS -= 1;
+            }
+            else
+                UARTprintf("Phase skipped\n");
+        }
+        else if(Phase == PHASE_4){
+            if(PREV_MOTOR_STATE == PHASE_3){
+                MOTOR_POS += 1;
+            }
+            else if(PREV_MOTOR_STATE == PHASE_1){
+                MOTOR_POS -= 1;
+            }
+            else
+                UARTprintf("Phase skipped\n");
+        }
+        PREV_MOTOR_STATE = Phase;
     }
 
-    /*
-    if ( mask & Quad_A)
-    {
-		if(A_State)
-		{
-			UARTprintf("Quad_A High\n");
-            if(MOTOR_STATE & (Quad_B)){ // B is High
-                UARTprintf("Forward...\n");
-                MOTOR_POS += 1;
-                MOTOR_STATE |= Quad_A;
-            }
-            else{                       // B is Low
-                UARTprintf("Backward...\n");
-                MOTOR_POS -= 1;
-                MOTOR_STATE |= Quad_A;
-            }
-            //MOTOR_POS += 100;
-			//A_State = !A_State;
-		}else if(!A_State)
-		{
-			UARTprintf("Quad_A Low\n");
-            if(MOTOR_STATE & ~(Quad_B)){ // B is Low
-                UARTprintf("Forward...\n");
-                MOTOR_POS += 1;
-                MOTOR_STATE &= ~Quad_A;
-            }
-            else{                        // B is High
-                UARTprintf("Backward...\n");
-                MOTOR_POS -= 1;
-                MOTOR_STATE &= ~Quad_A;
-            }
-		}
-
-    }
-
-    if( mask & Quad_B)
-    {
-		if(B_State)		
-		{
-			UARTprintf("Quad_B High\n");
-            if(MOTOR_STATE & ~(Quad_A)){ // A is low
-                UARTprintf("Forward...\n");
-                MOTOR_POS += 1;
-                MOTOR_STATE |= Quad_B;
-            }
-            else{                        // A is high
-                UARTprintf("Backward...\n");
-                MOTOR_POS -= 1;
-                MOTOR_STATE |= Quad_B;
-            }
-            //MOTOR_POS += 50;
-			//B_State = !B_State;
-		}else if(!B_State)
-		{
-			UARTprintf("Quad_B Low\n");
-            if(MOTOR_STATE & ~(Quad_A)){ // A is low
-                UARTprintf("Backward...\n");
-                MOTOR_POS += 1;
-                MOTOR_STATE &= ~Quad_B;
-            }
-            else{                        // A is high
-                UARTprintf("Forward...\n");
-                MOTOR_POS -= 1;
-                MOTOR_STATE &= ~Quad_B;
-            }
-            //MOTOR_POS -= 50;
-			//B_State = !B_State;
-		}
-        
-	
-	}
-    */
-
-    UARTprintf("MOTOR POS = %u\n",MOTOR_POS);
+    //UARTprintf("Phase: %x\n", Phase);
 
     if (xHigherPriorityTaskWoken)
     {
@@ -351,7 +243,7 @@ _setupHardware(void)
 static void
 _heartbeat( void *notUsed )
 {
-    uint32_t green500ms = 100; // 1 second
+    uint32_t green500ms = 500; // 1 second
     uint32_t ledOn = 0;
 
     uint32_t prevTicks = 0;
@@ -383,9 +275,9 @@ _heartbeat( void *notUsed )
         else
             totalTime = startTime + (ROM_SysCtlClockGet() - endTime);
 
-        //UARTprintf("Rotations = %d", totalTicks/300);
-        //mUARTprintf("Time in system ticks: %d\n", totalTime);
-        // print(Speed = rotations/time)
+        //UARTprintf("Total Motor Rotations = %d\n", totalTicks/300);
+        //UARTprintf("Time in system ticks: %d\n", totalTime);
+        UARTprintf("%d RPM\n", (totalTicks/300) * 120);
 
 
 
