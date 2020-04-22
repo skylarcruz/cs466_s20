@@ -194,6 +194,7 @@ static void byteWrite(uint8_t address, uint8_t data)		//write command is 0xb_
     GPIO_PORTD_DATA_R &= ~SPI_CS;
     //UARTprintf("CS LOW\n");
     
+
     transfer(firstByte);
     
     //vTaskDelay(MsCount/portTICK_RATE_MS);

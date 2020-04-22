@@ -35,7 +35,7 @@
 #define IN2   (1<<3)
 
 #include "assert.h"
-#include "pwm.h"
+#include "pwmLocal.h"
 #include "motor.h"
 
 #define DEADBAND 0 // What is this for?
@@ -66,6 +66,7 @@ _interruptHandlerPort(void)
     _encoder += lookup[tt & 0x0F];
     GPIOIntClear(GPIO_PORTC_BASE, mask);
 }
+
 #endif
 
 
@@ -74,7 +75,7 @@ _interruptHandlerPort(void)
 // lab using the change in the 2 state variable system 
 // to generate the encoder position change
 //
-#if 0
+#if 1
 static void 
 _interruptHandlerPort(void)
 {
@@ -152,7 +153,7 @@ void motorDrive(int32_t sp)
         GPIO_PORTE_DATA_R |= IN2;
     }
     
-    duty = (abs(sp) * (100 - DEADBAND) / 100);
+    int duty = (abs(sp) * (100 - DEADBAND) / 100);
 
     setPWMDuty(abs(sp));
 
@@ -220,9 +221,9 @@ _pidServo( void *notUsed )
     double integral = 0;
     int dt=10;
 
-    double Kp = 0;  // TODO: Requires setting see PID Wiki for tuning
-    double Ki = 0;  // TODO: Requires setting see PID Wiki for tuning
-    double Kd = 0;  // TODO: Requires setting see PID Wiki for tuning
+    double Kp = 0.35;  // TODO: Requires setting see PID Wiki for tuning
+    double Ki = 0.002;  // TODO: Requires setting see PID Wiki for tuning
+    double Kd = 0.05;  // TODO: Requires setting see PID Wiki for tuning
 
     while(1)
     {
@@ -237,7 +238,8 @@ _pidServo( void *notUsed )
         previous_error = error;
 
 #ifdef USB_SERIAL_OUTPUT
-        UARTprintf("  !! sp:%d, mp:%d, d:%d, o:%d\n", _motorSetpoint, _encoder, drive);
+        //UARTprintf("  !! sp:%d, mp:%d, d:%d, o:%d\n", _motorSetpoint, _encoder, drive);
+        UARTprintf("  !! sp:%d, mp:%d, d:%d\n", _motorSetpoint, _encoder, drive);
 #endif
 
         vTaskDelay(dt);        
@@ -267,6 +269,7 @@ void motor_init(void)
     //
     GPIOIntRegister(GPIO_PORTC_BASE, _interruptHandlerPort);
     GPIOIntTypeSet(GPIO_PORTC_BASE, (PHA|PHB), GPIO_BOTH_EDGES);
+    GPIOIntEnable(GPIO_PORTC_BASE, (PHA|PHB));
 
     xTaskCreate(_pidServo,
                 "bid",

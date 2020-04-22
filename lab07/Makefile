@@ -122,6 +122,8 @@ ${COMPILER}/${TARGET}.axf: ${COMPILER}/timers.o
 #
 ${COMPILER}/${TARGET}.axf: ${COMPILER}/MotorDriver.o
 ${COMPILER}/${TARGET}.axf: ${COMPILER}/assert.o
+${COMPILER}/${TARGET}.axf: ${COMPILER}/motor.o
+${COMPILER}/${TARGET}.axf: ${COMPILER}/pwmLocal.o
 ${COMPILER}/${TARGET}.axf: ${COMPILER}/startup_${COMPILER}.o
 
 #
