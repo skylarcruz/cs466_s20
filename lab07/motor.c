@@ -158,7 +158,7 @@ void motorDrive(int32_t sp)
     setPWMDuty(abs(sp));
 
 #ifdef USB_SERIAL_OUTPUT
-    UARTprintf("    !! sp:%d, i1:%d, i2:%d, pwm%d\n", sp, in1, in2, abs(sp));
+    //UARTprintf("    !! sp:%d, i1:%d, i2:%d, pwm%d\n", sp, in1, in2, abs(sp));
 #endif
 }
 
@@ -221,9 +221,9 @@ _pidServo( void *notUsed )
     double integral = 0;
     int dt=10;
 
-    double Kp = 0.35;  // TODO: Requires setting see PID Wiki for tuning
-    double Ki = 0.002;  // TODO: Requires setting see PID Wiki for tuning
-    double Kd = 0.05;  // TODO: Requires setting see PID Wiki for tuning
+    double Kp = 0.5;  // TODO: Requires setting see PID Wiki for tuning
+    double Ki = 0.0015;  // TODO: Requires setting see PID Wiki for tuning
+    double Kd = 0.5;  // TODO: Requires setting see PID Wiki for tuning
 
     while(1)
     {
@@ -239,7 +239,7 @@ _pidServo( void *notUsed )
 
 #ifdef USB_SERIAL_OUTPUT
         //UARTprintf("  !! sp:%d, mp:%d, d:%d, o:%d\n", _motorSetpoint, _encoder, drive);
-        UARTprintf("  !! sp:%d, mp:%d, d:%d\n", _motorSetpoint, _encoder, drive);
+        //UARTprintf("  !! sp:%d, mp:%d, d:%d\n", _motorSetpoint, _encoder, drive);
 #endif
 
         vTaskDelay(dt);        
@@ -285,7 +285,7 @@ void motor_move(uint32_t pos_in_tics)
 {
 
 #ifdef USB_SERIAL_OUTPUT
-    UARTprintf("  !! motor position is %d..\n", _encoder);
+    //UARTprintf("  !! motor position is %d..\n", _encoder);
 #endif
 
     _motorSetpoint = pos_in_tics;
@@ -293,8 +293,14 @@ void motor_move(uint32_t pos_in_tics)
 
 motor_status_t motor_status(void)
 {
-    // TODO:
-    return M_IDLE;
+    if(abs(_motorSetpoint - _encoder) < 20){
+        vTaskDelay(1 / portTICK_RATE_MS);
+        if(abs(_motorSetpoint - _encoder) < 20){
+            return M_IDLE;
+        }
+    }
+
+    return M_BUSY;
 }
 
 

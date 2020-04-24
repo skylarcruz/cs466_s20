@@ -60,6 +60,8 @@ uint32_t SystemCoreClock;
 
 int Pos[7] = {1000, 2000, 3000, -5000, 10000, -1000, 0};
 int currPos = -1;
+int LED_R_flag = 0;
+int resetCountdown = -1;
 
 // uint32_t MOTOR_POS = 0;
 // //uint8_t MOTOR_STATE = 0x00; // A = bit 0, B = bit 1
@@ -119,7 +121,77 @@ delayMs(uint32_t ms)
 }
 
 
+static void 
+_interruptHandlerPortF(void)
+{
 
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    uint32_t mask = GPIOIntStatus(GPIO_PORTF_BASE, 1);
+
+    if (mask)
+    {
+        //UARTprintf("Interrupt Triggered\n");
+        if(GPIO_PORTF_DATA_R & SW1){
+            //UARTprintf("SW1 UnPressed\n");
+            resetCountdown = -1;
+        }
+        else{
+            //UARTprintf("SW1 Pressed\n");
+            if(currPos < 6){
+                currPos++; 
+                UARTprintf("Moving Motor to position %d\n", Pos[currPos]);
+                GPIO_PORTF_DATA_R |= LED_B;
+            }
+            else{
+                currPos = 0; 
+                UARTprintf("Moving Motor to position %d\n", Pos[currPos]);
+                GPIO_PORTF_DATA_R |= LED_B;
+            }
+        }
+        if(GPIO_PORTF_DATA_R & SW2){
+            //UARTprintf("SW2 Not Pressed\n");
+            resetCountdown = -1;
+        }
+        else{
+            //UARTprintf("SW2 Pressed\n");
+            if(currPos > 0){
+                currPos--; 
+                UARTprintf("Moving Motor to position %d\n", Pos[currPos]);
+            }
+            else if(currPos == 0){
+                currPos = 6; 
+                UARTprintf("Moving Motor to position %d\n", Pos[currPos]);
+            }
+        }
+
+        // UARTprintf("sw1 test = %x\n", (~GPIO_PORTF_DATA_R & SW1) >> 4);
+        // UARTprintf("sw1 test = %x\n", (~GPIO_PORTF_DATA_R & SW1) >> 4);
+        
+        // UARTprintf("sw2 test = %x\n", (~GPIO_PORTF_DATA_R & SW2));
+
+        if( ((~GPIO_PORTF_DATA_R & SW1) >> 4) & ((~GPIO_PORTF_DATA_R & SW2)) ){
+            if(currPos > -1){
+                resetCountdown = 5;
+            }
+        }
+    }
+
+    if (xHigherPriorityTaskWoken)
+    {
+        // should request a schedule update....  
+        // ....stay tuned
+    }    
+
+    if(currPos > -1){
+        GPIO_PORTF_DATA_R |= LED_B;
+    }
+    else{
+        GPIO_PORTF_DATA_R &= ~LED_B;
+    }
+
+    GPIOIntClear(GPIO_PORTF_BASE, mask);
+}
 
 
 static void
@@ -134,9 +206,6 @@ _setupHardware(void)
     GPIO_PORTF_LOCK_R = 0x4C4F434B; // unlock for SW2
     GPIO_PORTF_CR_R = 0xff;
 
-    //SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
-
-
     // Enable the GPIO pin for the LED (PF3).  Set the direction as output, and
     // enable the GPIO pin for digital function.
     // These are TiveDriver library functions
@@ -145,16 +214,6 @@ _setupHardware(void)
     GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, (LED_G|LED_R|LED_B));
     GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, (SW1 | SW2) );
     GPIOPadConfigSet(GPIO_PORTF_BASE, (SW1 | SW2), GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
-
-    //GPIOPinTypeGPIOInput(GPIO_PORTD_BASE, (Quad_A | Quad_B) );
-    
-    //GPIOIntRegister(GPIO_PORTD_BASE, _interruptHandlerPortD);
-    //GPIOIntTypeSet(GPIO_PORTD_BASE, (Quad_A | Quad_B), GPIO_BOTH_EDGES);
-    //GPIOIntTypeSet(GPIO_PORTD_BASE, Quad_B, GPIO_BOTH_EDGES);
-
-    //IntPrioritySet(INT_GPIOD, 255);  // Required with FreeRTOS 10.1.1, 
-    //GPIOIntEnable(GPIO_PORTD_BASE, (Quad_A | Quad_B) );
-    //GPIOIntEnable(GPIO_PORTD_BASE, Quad_B);
 
     // Timer Setup
     //ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
@@ -192,9 +251,14 @@ _heartbeat( void *notUsed )
     // uint32_t startTime;
     // uint32_t endTime;
     // uint32_t totalTime;
+
+    GPIOIntRegister(GPIO_PORTF_BASE, _interruptHandlerPortF);
+    GPIOIntTypeSet(GPIO_PORTF_BASE, (SW1 | SW2), GPIO_BOTH_EDGES);
+    GPIOIntEnable(GPIO_PORTF_BASE, (SW1 | SW2));
 	
     while(true)
     {
+
         if(count == 0)
             ledOn = 1;
         else
@@ -206,35 +270,69 @@ _heartbeat( void *notUsed )
             count++;
         else{
             count = 0;
-            motor_move(1000);
+            //motor_move(1000);
         }
 
         vTaskDelay(green100ms / portTICK_RATE_MS);
 
-        // prevTicks = MOTOR_POS;
-        // startTime = TimerValueGet(TIMER0_BASE, TIMER_A);
-
-        // //UARTprintf("Heartbeat led: %u\n",ledOn);
-        // vTaskDelay(green500ms / portTICK_RATE_MS);
-
-        // newTicks = MOTOR_POS;
-        // totalTicks = newTicks - prevTicks;
-
-        // endTime = TimerValueGet(TIMER0_BASE, TIMER_A);
-
-        // if(startTime > endTime)
-        //     totalTime = startTime - endTime;
-        // else
-        //     totalTime = startTime + (ROM_SysCtlClockGet() - endTime);
-
-        // //UARTprintf("Total Motor Rotations = %d\n", totalTicks/300);
-        // //UARTprintf("Time in system ticks: %d\n", totalTime);
-        // UARTprintf("%d RPM\n", (totalTicks/300) * 120);
-
-
-
-		
+        if(resetCountdown > 0){
+            resetCountdown--;
+        }
+        else if(resetCountdown == 0){
+            UARTprintf("Begin reset!\n");
+            currPos = -1;
+            resetCountdown = -1;
+        }
+        		
     }
+}
+
+static void
+_motorPoll( void *notUsed )
+{
+
+    while(true){
+
+        motor_move(Pos[currPos]);
+        if(currPos == -1){
+            LED_R_flag = -1;
+        }
+        if(motor_status() == M_IDLE && currPos > -1){
+            LED_R_flag = 0;
+        }
+        else
+            LED_R_flag = 1;
+
+        vTaskDelay(1 / portTICK_RATE_MS);
+
+    }
+
+}
+
+static void
+_LED_R_Poll( void *notUsed )
+{
+    uint32_t ledOn = 0;
+
+    while(true){
+
+
+        if(LED_R_flag == -1){
+            GPIO_PORTF_DATA_R |= LED_R;
+            vTaskDelay(50 / portTICK_RATE_MS);
+        }
+        else if(LED_R_flag == 0){
+            GPIO_PORTF_DATA_R &= ~LED_R;
+        }
+        else{
+            ledOn = !ledOn;
+            LED(LED_R,ledOn);
+        }
+
+        vTaskDelay(50 / portTICK_RATE_MS);
+
+    }
+
 }
 
 int main( void )
@@ -255,6 +353,20 @@ int main( void )
                 configMINIMAL_STACK_SIZE,
                 NULL,
                 tskIDLE_PRIORITY + 1,  // higher numbers are higher priority..
+                NULL );
+
+    xTaskCreate(_motorPoll,
+                "green",
+                configMINIMAL_STACK_SIZE,
+                NULL,
+                tskIDLE_PRIORITY + 2,  // higher numbers are higher priority..
+                NULL );
+
+    xTaskCreate(_LED_R_Poll,
+                "green",
+                configMINIMAL_STACK_SIZE,
+                NULL,
+                tskIDLE_PRIORITY + 2,  // higher numbers are higher priority..
                 NULL );
 
     /* Start the tasks and timer running. */
